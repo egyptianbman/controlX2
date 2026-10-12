@@ -241,7 +241,7 @@ class NightscoutClientIntegrationTest {
         assertEquals(1, body.size)
         assertEquals("Bolus", body[0]["eventType"])
         assertEquals(2.5, body[0]["insulin"])
-        assertEquals("2001", body[0]["pumpId"])
+        assertEquals("2001", body[0]["id"])
         assertEquals("ControlX2", body[0]["enteredBy"])
         assertEquals("ControlX2", body[0]["device"])
         assertEquals("Test bolus", body[0]["notes"])
@@ -655,7 +655,7 @@ class NightscoutClientIntegrationTest {
     }
 
     @Test
-    fun treatmentPumpId_matchesSeqId() = runBlocking {
+    fun treatmentId_matchesSeqId() = runBlocking {
         val treatments = listOf(
             NightscoutTreatment.fromTimestamp(
                 eventType = "Bolus",
@@ -668,7 +668,7 @@ class NightscoutClientIntegrationTest {
 
         val type = object : TypeToken<List<Map<String, Any>>>() {}.type
         val body: List<Map<String, Any>> = gson.fromJson(server.capturedRequests[0].body, type)
-        assertEquals("54321", body[0]["pumpId"])
+        assertEquals("54321", body[0]["id"])
     }
 
     // --- URL edge case ---

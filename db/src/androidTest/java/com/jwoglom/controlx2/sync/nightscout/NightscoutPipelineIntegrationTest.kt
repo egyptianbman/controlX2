@@ -435,12 +435,12 @@ class NightscoutPipelineIntegrationTest {
 
         assertEquals("Bolus", treatments[0]["eventType"])
         assertEquals(2.5, treatments[0]["insulin"])
-        assertEquals("2001", treatments[0]["pumpId"])
+        assertEquals("2001", treatments[0]["id"])
         assertEquals("ControlX2", treatments[0]["enteredBy"])
 
         assertEquals("Bolus", treatments[1]["eventType"])
         assertEquals(0.75, treatments[1]["insulin"])
-        assertEquals("2002", treatments[1]["pumpId"])
+        assertEquals("2002", treatments[1]["id"])
     }
 
     @Test
@@ -1153,7 +1153,7 @@ class NightscoutPipelineIntegrationTest {
         assertEquals(50.0, combo["splitExt"])          // 50% extended
         assertEquals(120.0, combo["duration"])          // 120 min
         assertEquals(2.5, combo["relative"])            // 5U / 120min * 60 = 2.5 U/hr
-        assertEquals("25001", combo["pumpId"])
+        assertEquals("25001", combo["id"])
     }
 
     @Test
@@ -1263,7 +1263,7 @@ class NightscoutPipelineIntegrationTest {
         val treatmentType = object : TypeToken<List<Map<String, Any>>>() {}.type
         val treatments: List<Map<String, Any>> = gson.fromJson(treatmentRequests2[0].body, treatmentType)
         assertTrue("Retried bolus should include seqId 30002",
-            treatments.any { it["pumpId"] == "30002" })
+            treatments.any { it["id"] == "30002" })
     }
 
     @Test

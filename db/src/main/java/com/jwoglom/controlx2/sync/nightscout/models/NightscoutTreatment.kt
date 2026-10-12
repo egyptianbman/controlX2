@@ -48,8 +48,8 @@ data class NightscoutTreatment(
     @SerializedName("_id")
     val id: String? = null,  // Nightscout-assigned ID (on read)
 
-    @SerializedName("pumpId")
-    val pumpId: String? = null,  // Our unique identifier (seqId) - used for deduplication
+    @SerializedName("id")
+    val clientTreatmentId: String? = null,  // Our unique identifier (seqId) - NightScout client idempotency key (JSON "id"), used for deduplication
 
     @SerializedName("device")
     val device: String = "ControlX2",
@@ -102,7 +102,7 @@ data class NightscoutTreatment(
                 absolute = absolute,
                 reason = reason,
                 notes = notes,
-                pumpId = seqId.toString(),
+                clientTreatmentId = seqId.toString(),
                 enteredInsulin = enteredInsulin,
                 splitNow = splitNow,
                 splitExt = splitExt,

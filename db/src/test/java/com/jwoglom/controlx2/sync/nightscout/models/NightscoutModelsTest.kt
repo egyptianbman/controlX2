@@ -75,7 +75,7 @@ class NightscoutModelsTest {
         assertEquals("Lunch bolus", treatment.notes)
         assertEquals("ControlX2", treatment.enteredBy)
         assertEquals("ControlX2", treatment.device)
-        assertEquals("54321", treatment.pumpId)
+        assertEquals("54321", treatment.clientTreatmentId)
         assertTrue(treatment.createdAt.endsWith("Z"))
 
         val expectedEpochMilli = timestamp.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
@@ -109,7 +109,7 @@ class NightscoutModelsTest {
         assertNotNull(treatment.absolute)
         assertEquals(1.5, treatment.absolute!!, 0.001)
         assertEquals("High BG", treatment.reason)
-        assertEquals("11111", treatment.pumpId)
+        assertEquals("11111", treatment.clientTreatmentId)
     }
 
     @Test
@@ -221,7 +221,7 @@ class NightscoutModelsTest {
         assertEquals("Carb Correction", treatment.eventType)
         assertEquals(30.0, treatment.carbs!!, 0.001)
         assertNull(treatment.insulin)
-        assertEquals("77777", treatment.pumpId)
+        assertEquals("77777", treatment.clientTreatmentId)
         assertEquals("ControlX2", treatment.enteredBy)
     }
 
@@ -249,7 +249,7 @@ class NightscoutModelsTest {
         assertEquals(50, treatment.splitExt)
         assertEquals(120, treatment.duration)
         assertEquals(2.5, treatment.relative!!, 0.001)
-        assertEquals("88888", treatment.pumpId)
+        assertEquals("88888", treatment.clientTreatmentId)
     }
 
     @Test
