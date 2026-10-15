@@ -137,6 +137,10 @@ class ProcessBasal(
         return when (parsed) {
             is BasalDeliveryHistoryLog -> {
                 val commandedRate = parsed.commandedRate / 1000.0
+                val source = parsed.commandedRateSource
+                val automatic = automaticFromSource(source)
+                val reason = suspendReasonFromSource(source)
+                val basalOrigin = basalOriginFromSource(source)
                 val notes = buildString {
                     append("Basal delivery")
                     append(", commanded rate: ${commandedRate}U/hr")
@@ -158,6 +162,9 @@ class ProcessBasal(
                     rate = commandedRate,
                     absolute = commandedRate,
                     duration = durationMinutes,
+                    automatic = automatic,
+                    reason = reason,
+                    additionalProperties = if (basalOrigin != null) mapOf("basalOrigin" to basalOrigin) else null,
                     notes = notes
                 )
             }
@@ -183,5 +190,22 @@ class ProcessBasal(
                 null
             }
         }
+    }
+
+    // Commanded Rate Source enum: 0=Suspended, 1=Profile, 2=Temp Rate,
+    // 3=Algorithm, 4=Temp Rate and Algorithm.
+    //   automatic=true  -> nocturne renders Algorithm origin (invisible mode strip)
+    //   automatic=null  -> Profile delivery: nocturne reads additionalProperties.basalOrigin
+    //                      = "Scheduled" and renders the scheduled basal line, not the Manual
+    //                      (blue) temp bar (only Manual origin paints that bar)
+    //   automatic=false -> Temp Rate: Manual origin (blue bar)
+    internal companion object {
+        fun automaticFromSource(source: Int): Boolean? = when (source) {
+            3, 4 -> true   // Algorithm-driven (Control-IQ)
+            1 -> null      // Profile: let basalOrigin=Scheduled decide
+            else -> false  // Suspended, Temp Rate
+        }
+        fun basalOriginFromSource(source: Int): String? = if (source == 1) "Scheduled" else null
+        fun suspendReasonFromSource(source: Int): String? = if (source == 0) "suspend" else null
     }
 }

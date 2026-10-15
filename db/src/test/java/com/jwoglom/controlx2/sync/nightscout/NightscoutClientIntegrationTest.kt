@@ -7,6 +7,7 @@ import com.jwoglom.controlx2.sync.nightscout.api.NightscoutClient
 import com.jwoglom.controlx2.sync.nightscout.models.NightscoutEntry
 import com.jwoglom.controlx2.sync.nightscout.models.NightscoutTreatment
 import com.jwoglom.controlx2.sync.nightscout.models.createDeviceStatus
+import com.jwoglom.controlx2.sync.nightscout.processors.ProcessBasal
 import fi.iki.elonen.NanoHTTPD
 import kotlinx.coroutines.runBlocking
 import org.junit.After
@@ -288,6 +289,66 @@ class NightscoutClientIntegrationTest {
         assertEquals(0.0, body[0]["rate"])
         assertEquals(0.0, body[0]["absolute"])
         assertEquals("Pumping suspended", body[0]["reason"])
+    }
+
+    @Test
+    fun uploadTreatments_serializesAutomaticFlag() = runBlocking {
+        val algorithm = NightscoutTreatment.fromTimestamp(
+            eventType = "Temp Basal",
+            timestamp = LocalDateTime.of(2024, 3, 15, 14, 0, 0),
+            seqId = 3001L, rate = 1.45, absolute = 1.45, duration = 30, automatic = true
+        )
+        val manual = NightscoutTreatment.fromTimestamp(
+            eventType = "Temp Basal",
+            timestamp = LocalDateTime.of(2024, 3, 15, 14, 0, 0),
+            seqId = 3002L, rate = 2.0, absolute = 2.0, duration = 30, automatic = false
+        )
+        client.uploadTreatments(listOf(algorithm, manual))
+
+        val type = object : TypeToken<List<Map<String, Any>>>() {}.type
+        val body: List<Map<String, Any>> = gson.fromJson(server.capturedRequests[0].body, type)
+
+        assertEquals(true, body[0]["automatic"])
+        assertEquals(false, body[1]["automatic"])
+    }
+
+    @Test
+    fun automaticFlag_mappingFromCommandedRateSource() {
+        // Commanded Rate Source enum: 0=Suspended, 1=Profile, 2=Temp Rate,
+        // 3=Algorithm, 4=Temp Rate and Algorithm.
+        assertEquals(true, ProcessBasal.automaticFromSource(3))    // Algorithm
+        assertEquals(true, ProcessBasal.automaticFromSource(4))    // Temp Rate and Algorithm
+        assertEquals(false, ProcessBasal.automaticFromSource(2))   // Temp Rate (manual)
+        assertEquals(null, ProcessBasal.automaticFromSource(1))    // Profile: basalOrigin=Scheduled
+        assertEquals(false, ProcessBasal.automaticFromSource(0))   // Suspended
+        assertEquals("suspend", ProcessBasal.suspendReasonFromSource(0))
+        assertEquals(null, ProcessBasal.suspendReasonFromSource(3))
+        assertEquals("Scheduled", ProcessBasal.basalOriginFromSource(1))
+        assertEquals(null, ProcessBasal.basalOriginFromSource(3))
+    }
+
+    @Test
+    fun profileBasal_serializesScheduledOriginWithoutAutomaticFlag() = runBlocking {
+        // nocturne's MapTempBasalOrigin only reads additionalProperties.basalOrigin when the
+        // automatic field is ABSENT (any value short-circuits to Algorithm/Manual). Profile must
+        // therefore omit automatic and echo basalOrigin=Scheduled so it renders as the scheduled
+        // basal line, not the Manual (blue) temp bar.
+        val profile = NightscoutTreatment.fromTimestamp(
+            eventType = "Temp Basal",
+            timestamp = LocalDateTime.of(2024, 3, 15, 14, 0, 0),
+            seqId = 4001L, rate = 1.0, absolute = 1.0, duration = 30,
+            automatic = null,
+            additionalProperties = mapOf("basalOrigin" to "Scheduled")
+        )
+        client.uploadTreatments(listOf(profile))
+
+        val type = object : TypeToken<List<Map<String, Any>>>() {}.type
+        val body: List<Map<String, Any>> = gson.fromJson(server.capturedRequests[0].body, type)
+
+        @Suppress("UNCHECKED_CAST")
+        val props = body[0]["additionalProperties"] as? Map<String, Any>
+        assertEquals("Scheduled", props?.get("basalOrigin"))
+        assertEquals(false, body[0].containsKey("automatic"))
     }
 
     @Test
