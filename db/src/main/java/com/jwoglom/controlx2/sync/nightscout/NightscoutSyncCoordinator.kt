@@ -29,7 +29,7 @@ class NightscoutSyncCoordinator(
     // Map processor types to instances
     private val processorMap: Map<ProcessorType, BaseProcessor> = mapOf(
         ProcessorType.CGM_READING to ProcessCGMReading(nightscoutApi, historyLogRepo),
-        ProcessorType.BOLUS to ProcessBolus(nightscoutApi, historyLogRepo),
+        ProcessorType.BOLUS to ProcessBolus(nightscoutApi, historyLogRepo, processorStateDao),
         ProcessorType.BASAL to ProcessBasal(nightscoutApi, historyLogRepo),
         ProcessorType.BASAL_SUSPENSION to ProcessBasalSuspension(nightscoutApi, historyLogRepo),
         ProcessorType.BASAL_RESUME to ProcessBasalResume(nightscoutApi, historyLogRepo),
@@ -118,12 +118,17 @@ class NightscoutSyncCoordinator(
             val processorState = processorStateDao.getByType(processorType.name)
             val processorLastSeqId = processorState?.lastProcessedSeqId
                 ?: syncState.lastProcessedSeqId
+            val currentMaxBolusId = processorState?.maxProcessedBolusId ?: 0
 
             // Filter logs for this processor's supported types AND above its cursor
-            val relevantLogs = allLogs.filter { log ->
+            val candidateLogs = allLogs.filter { log ->
                 processor.supportedTypeIds().contains(log.typeId) &&
                     log.seqId > processorLastSeqId
             }.sortedBy { it.seqId }
+
+            // Dedup combo/dual bolus delivery updates: keep only the first (start-time) entry per
+            // pump bolusID; nocturne collapses the rest via the stable sync_identifier.
+            val (relevantLogs, newMaxBolusId) = processor.dedupeComboBolus(candidateLogs, currentMaxBolusId)
 
             if (relevantLogs.isEmpty()) {
                 Timber.d("No logs for processor ${processorType.name}")
@@ -132,7 +137,8 @@ class NightscoutSyncCoordinator(
                     NightscoutProcessorState(
                         processorType = processorType.name,
                         lastProcessedSeqId = latestSeqId,
-                        lastSuccessTime = LocalDateTime.now()
+                        lastSuccessTime = LocalDateTime.now(),
+                        maxProcessedBolusId = newMaxBolusId,
                     )
                 )
                 continue
@@ -147,7 +153,8 @@ class NightscoutSyncCoordinator(
                     NightscoutProcessorState(
                         processorType = processorType.name,
                         lastProcessedSeqId = latestSeqId,
-                        lastSuccessTime = LocalDateTime.now()
+                        lastSuccessTime = LocalDateTime.now(),
+                        maxProcessedBolusId = newMaxBolusId,
                     )
                 )
 

@@ -52,4 +52,22 @@ abstract class BaseProcessor(
      * Helper method to get the processor name for logging
      */
     protected fun processorName(): String = processorType().name
+
+    /**
+     * Dedup combo/dual bolus delivery-update entries that share a pump bolusID.
+     *
+     * The Tandem pump emits one history-log entry per extended-delivery update for a combo/dual
+     * bolus; all entries share the same pump bolusID but have distinct seqIds and timestamps.
+     * Left as-is, nocturne (which dedups on sync_identifier) cannot collapse them, so every
+     * delivery update becomes a separate treatment that "builds up". The default returns the logs
+     * unchanged; ProcessBolus overrides this to keep only the first (start-time) entry per bolusID.
+     *
+     * @param logs logs already filtered to this processor's supported types and sorted by seqId
+     * @param maxProcessedBolusId highest pump bolusID already uploaded in a prior sync
+     * @return filtered logs to upload, paired with the updated maxProcessedBolusId cursor
+     */
+    open fun dedupeComboBolus(
+        logs: List<HistoryLogItem>,
+        maxProcessedBolusId: Int
+    ): Pair<List<HistoryLogItem>, Int> = logs to maxProcessedBolusId
 }

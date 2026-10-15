@@ -5,6 +5,7 @@ import com.jwoglom.controlx2.db.historylog.HistoryLogRepo
 import com.jwoglom.controlx2.sync.nightscout.NightscoutSyncConfig
 import com.jwoglom.controlx2.sync.nightscout.ProcessorType
 import com.jwoglom.controlx2.sync.nightscout.api.NightscoutApi
+import com.jwoglom.controlx2.db.nightscout.NightscoutProcessorStateDao
 import com.jwoglom.controlx2.sync.nightscout.models.NightscoutTreatment
 import com.jwoglom.pumpx2.pump.messages.response.historyLog.BolusDeliveryHistoryLog
 import com.jwoglom.pumpx2.pump.messages.response.historyLog.HistoryLogParser
@@ -18,7 +19,8 @@ import timber.log.Timber
  */
 class ProcessBolus(
     nightscoutApi: NightscoutApi,
-    historyLogRepo: HistoryLogRepo
+    historyLogRepo: HistoryLogRepo,
+    private val processorStateDao: NightscoutProcessorStateDao
 ) : BaseProcessor(nightscoutApi, historyLogRepo) {
 
     override fun processorType() = ProcessorType.BOLUS
@@ -27,6 +29,35 @@ class ProcessBolus(
         return setOfNotNull(
             HistoryLogParser.LOG_MESSAGE_CLASS_TO_ID[BolusDeliveryHistoryLog::class.java]
         )
+    }
+    /**
+     * Keep only the first (start-time) entry per combo/dual bolus; drop later extended-delivery
+     * updates. The pump emits one history-log entry per update for a combo bolus, all sharing a
+     * single pump bolusID but with distinct seqIds/timestamps. nocturne dedups on sync_identifier,
+     * so a stable key (the pump bolusID) lets it collapse the updates into one treatment. Standard
+     * (non-extended) boluses are not split, so they always pass through unchanged.
+     */
+    override fun dedupeComboBolus(
+        logs: List<HistoryLogItem>,
+        maxProcessedBolusId: Int
+    ): Pair<List<HistoryLogItem>, Int> {
+        val seen = HashSet<Int>()
+        val result = mutableListOf<HistoryLogItem>()
+        var newMax = maxProcessedBolusId
+        for (item in logs) { // already sorted by seqId
+            val bolus = item.parse() as? BolusDeliveryHistoryLog ?: continue
+            val isExtended = bolus.requestedLater > 0 && bolus.extendedDurationRequested > 0
+            if (!isExtended) {
+                result.add(item)
+                continue
+            }
+            val bolusID = bolus.bolusID
+            if (bolusID <= maxProcessedBolusId) continue // already uploaded in an earlier sync
+            if (!seen.add(bolusID)) continue // keep only the first (start-time) entry per combo bolus
+            result.add(item)
+            newMax = maxOf(newMax, bolusID)
+        }
+        return result to newMax
     }
 
     override suspend fun process(
@@ -74,7 +105,7 @@ class ProcessBolus(
         val isExtended = extendedInsulin > 0 && extendedDurationMinutes > 0
 
         return if (isExtended) {
-            buildComboBolus(item, parsed, totalInsulin, immediateInsulin, extendedInsulin, extendedDurationMinutes)
+            buildComboBolus(item, parsed, immediateInsulin, extendedInsulin, extendedDurationMinutes)
         } else {
             buildStandardBolus(item, parsed, totalInsulin)
         }
@@ -99,19 +130,23 @@ class ProcessBolus(
     private fun buildComboBolus(
         item: HistoryLogItem,
         bolus: BolusDeliveryHistoryLog,
-        totalInsulin: Double,
         immediateInsulin: Double,
         extendedInsulin: Double,
         extendedDurationMinutes: Int
     ): NightscoutTreatment {
-        // Per Nightscout spec:
-        // insulin = immediate portion only
+        // Per Nightscout/Nocturne spec:
+        // insulin = total programmed units (immediate + extended); Nocturne renders this as the bolus dose
+        // programmed = total programmed units (immediate + extended); drives Bolus.Programmed
+        // type = "dual" (combo) when an immediate portion exists, else "square" (pure extended)
         // enteredinsulin = total (immediate + extended)
-        // splitNow/splitExt = percentages (must sum to 100)
+        // splitNow/splitExt = percentages of the total programmed dose (must sum to 100)
         // relative = extended rate in U/hr
         // duration = extended duration in minutes
-        val splitNow = if (totalInsulin > 0) {
-            ((immediateInsulin / totalInsulin) * 100).toInt()
+        // syncIdentifier = the pump bolusID, stable across a combo bolus's delivery-update entries,
+        //   so nocturne upserts them into one treatment instead of building one row per update
+        val totalProgrammed = immediateInsulin + extendedInsulin
+        val splitNow = if (totalProgrammed > 0) {
+            ((immediateInsulin / totalProgrammed) * 100).toInt()
         } else 0
         val splitExt = 100 - splitNow
 
@@ -128,10 +163,13 @@ class ProcessBolus(
             eventType = "Combo Bolus",
             timestamp = item.pumpTimeLocal(),
             seqId = item.seqId,
-            insulin = immediateInsulin,
+            syncIdentifier = bolus.bolusID.toString(),
+            insulin = totalProgrammed,
+            programmed = totalProgrammed,
+            type = if (immediateInsulin > 0) "dual" else "square",
             duration = extendedDurationMinutes,
             notes = notes,
-            enteredInsulin = totalInsulin,
+            enteredInsulin = totalProgrammed,
             splitNow = splitNow,
             splitExt = splitExt,
             relative = relativeRate

@@ -1147,12 +1147,15 @@ class NightscoutPipelineIntegrationTest {
 
         val combo = treatments[0]
         assertEquals("Combo Bolus", combo["eventType"])
-        assertEquals(5.0, combo["insulin"])           // Immediate portion
-        assertEquals(10.0, combo["enteredinsulin"])    // Total insulin
-        assertEquals(50.0, combo["splitNow"])          // 50% now
-        assertEquals(50.0, combo["splitExt"])          // 50% extended
+        assertEquals(10.0, combo["insulin"])            // Total programmed dose (immediate + extended)
+        assertEquals(10.0, combo["programmed"])         // Total programmed dose
+        assertEquals(10.0, combo["enteredinsulin"])     // Total insulin
+        assertEquals(50.0, combo["splitNow"])           // 50% now
+        assertEquals(50.0, combo["splitExt"])           // 50% extended
+        assertEquals("dual", combo["type"])             // Combo (dual) bolus
         assertEquals(120.0, combo["duration"])          // 120 min
         assertEquals(2.5, combo["relative"])            // 5U / 120min * 60 = 2.5 U/hr
+        assertEquals("1", combo["syncIdentifier"])      // Stable pump bolusID (dedup key)
         assertEquals("25001", combo["id"])
     }
 
@@ -1184,6 +1187,80 @@ class NightscoutPipelineIntegrationTest {
         assertNull(bolus["splitNow"])
         assertNull(bolus["splitExt"])
         assertNull(bolus["relative"])
+    }
+
+    @Test
+    fun fullPipeline_squareBolus_uploadedAsComboSquare() = runBlocking {
+        // Square-wave (pure extended) bolus: 0U now + 6U over 120 min
+        val now = LocalDateTime.now()
+        val items = listOf(
+            buildHistoryLogItem(27001, now.minusMinutes(15),
+                buildComboBolusCargo(now.minusMinutes(15), 27001, 0, 6000, 120))
+        )
+        items.forEach { historyLogRepo.insert(it) }
+
+        val config = buildConfig(enabledProcessors = setOf(ProcessorType.BOLUS))
+        val coordinator = buildCoordinator(config)
+        val result = coordinator.syncAll()
+
+        assertTrue("Expected Success, got $result", result is SyncResult.Success)
+        assertEquals(1, (result as SyncResult.Success).uploadedCount)
+
+        val treatmentRequests = server.requestsForPath("/api/v1/treatments")
+        val type = object : TypeToken<List<Map<String, Any>>>() {}.type
+        val treatments: List<Map<String, Any>> = gson.fromJson(treatmentRequests[0].body, type)
+        assertEquals(1, treatments.size)
+
+        val square = treatments[0]
+        assertEquals("Combo Bolus", square["eventType"])
+        assertEquals(6.0, square["insulin"])            // Total programmed dose
+        assertEquals(6.0, square["programmed"])         // Total programmed dose
+        assertEquals(6.0, square["enteredinsulin"])     // Total insulin
+        assertEquals(0.0, square["splitNow"])           // 0% now
+        assertEquals(100.0, square["splitExt"])         // 100% extended
+        assertEquals("square", square["type"])          // Pure extended
+        assertEquals(120.0, square["duration"])         // 120 min
+        assertEquals(3.0, square["relative"])           // 6U / 120min * 60 = 3.0 U/hr
+        assertEquals("27001", square["id"])
+    }
+
+    @Test
+    fun fullPipeline_comboBolus_deliveryUpdatesCollapseToOne() = runBlocking {
+        // A combo bolus emits one history-log entry per extended-delivery update; all share a
+        // single pump bolusID but have distinct seqIds/timestamps. They must collapse into ONE
+        // treatment keyed on the stable pump bolusID (syncIdentifier), not one row per update.
+        val now = LocalDateTime.now()
+        val items = listOf(
+            buildHistoryLogItem(40001, now.minusMinutes(20),
+                buildComboBolusCargo(now.minusMinutes(20), 40001, 4000, 4000, 120)),
+            buildHistoryLogItem(40002, now.minusMinutes(15),
+                buildComboBolusCargo(now.minusMinutes(15), 40002, 4000, 4000, 120)),
+            buildHistoryLogItem(40003, now.minusMinutes(10),
+                buildComboBolusCargo(now.minusMinutes(10), 40003, 4000, 4000, 120))
+        )
+        items.forEach { historyLogRepo.insert(it) }
+
+        val config = buildConfig(enabledProcessors = setOf(ProcessorType.BOLUS))
+        val coordinator = buildCoordinator(config)
+        val result = coordinator.syncAll()
+
+        assertTrue("Expected Success, got $result", result is SyncResult.Success)
+        // Three delivery updates for one bolusID collapse to a single treatment.
+        assertEquals(1, (result as SyncResult.Success).uploadedCount)
+
+        val treatmentRequests = server.requestsForPath("/api/v1/treatments")
+        val type = object : TypeToken<List<Map<String, Any>>>() {}.type
+        val treatments: List<Map<String, Any>> = gson.fromJson(treatmentRequests[0].body, type)
+        assertEquals(1, treatments.size)
+
+        val combo = treatments[0]
+        assertEquals("Combo Bolus", combo["eventType"])
+        assertEquals(8.0, combo["insulin"])             // 4U now + 4U extended
+        assertEquals("dual", combo["type"])
+        assertEquals(50.0, combo["splitNow"])           // 4U / 8U = 50%
+        assertEquals("1", combo["syncIdentifier"])      // Shared pump bolusID across all updates
+        // The retained treatment is the FIRST (start-time) entry.
+        assertEquals("40001", combo["id"])
     }
 
     // =========================================================================

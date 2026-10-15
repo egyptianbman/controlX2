@@ -11,7 +11,7 @@ import com.jwoglom.controlx2.db.util.Converters
 
 @Database(
     entities = [NightscoutSyncState::class, NightscoutProcessorState::class],
-    version = 2,
+    version = 3,
     exportSchema = false
 )
 @TypeConverters(Converters::class)
@@ -34,6 +34,14 @@ abstract class NightscoutSyncStateDatabase : RoomDatabase() {
                 )
             }
         }
+        val MIGRATION_2_3 = object : Migration(2, 3) {
+            override fun migrate(db: SupportSQLiteDatabase) {
+                db.execSQL(
+                    "ALTER TABLE `$NightscoutProcessorStateTable` " +
+                    "ADD COLUMN `maxProcessedBolusId` INTEGER NOT NULL DEFAULT 0"
+                )
+            }
+        }
 
         fun getDatabase(context: Context): NightscoutSyncStateDatabase {
             return INSTANCE ?: synchronized(this) {
@@ -42,7 +50,7 @@ abstract class NightscoutSyncStateDatabase : RoomDatabase() {
                     NightscoutSyncStateDatabase::class.java,
                     NightscoutSyncStateTable
                 )
-                    .addMigrations(MIGRATION_1_2)
+                    .addMigrations(MIGRATION_1_2, MIGRATION_2_3)
                     .build()
                 INSTANCE = instance
                 return instance

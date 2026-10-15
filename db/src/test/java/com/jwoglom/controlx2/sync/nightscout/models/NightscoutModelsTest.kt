@@ -234,7 +234,7 @@ class NightscoutModelsTest {
             eventType = "Combo Bolus",
             timestamp = timestamp,
             seqId = 88888L,
-            insulin = 5.0,           // immediate portion only
+            insulin = 10.0,          // total programmed dose (immediate + extended)
             duration = 120,           // extended duration
             enteredInsulin = 10.0,   // total
             splitNow = 50,
@@ -243,7 +243,7 @@ class NightscoutModelsTest {
         )
 
         assertEquals("Combo Bolus", treatment.eventType)
-        assertEquals(5.0, treatment.insulin!!, 0.001)
+        assertEquals(10.0, treatment.insulin!!, 0.001)
         assertEquals(10.0, treatment.enteredInsulin!!, 0.001)
         assertEquals(50, treatment.splitNow)
         assertEquals(50, treatment.splitExt)
