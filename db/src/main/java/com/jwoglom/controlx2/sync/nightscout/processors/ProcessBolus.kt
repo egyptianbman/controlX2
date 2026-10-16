@@ -107,6 +107,15 @@ class ProcessBolus(
         return if (isExtended) {
             buildComboBolus(item, parsed, immediateInsulin, extendedInsulin, extendedDurationMinutes)
         } else {
+            // A standard bolus history-log record is emitted twice: a STARTED marker (status=1,
+            // deliveredTotal=0) before delivery and a COMPLETED record (status=0, deliveredTotal>0)
+            // after. nocturne's native Tandem connector only ever uploads a completed bolus, so the
+            // STARTED marker is spurious here — drop it. Combo/dual boluses are unaffected: they use
+            // the programmed requestedNow/requestedLater amounts, not deliveredTotal.
+            if (totalInsulin == 0.0) {
+                return null
+            }
+
             buildStandardBolus(item, parsed, totalInsulin)
         }
     }
