@@ -25,53 +25,23 @@ import androidx.compose.ui.tooling.preview.Preview
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import com.jwoglom.controlx2.LocalDataStore
-import com.jwoglom.controlx2.db.historylog.HistoryLogDummyDao
-import com.jwoglom.controlx2.db.historylog.HistoryLogItem
-import com.jwoglom.controlx2.db.historylog.HistoryLogRepo
-import com.jwoglom.controlx2.db.historylog.HistoryLogViewModel
 import com.jwoglom.controlx2.presentation.DataStore
 import com.jwoglom.controlx2.presentation.theme.ControlX2Theme
-import com.jwoglom.pumpx2.pump.messages.response.currentStatus.HistoryLogStatusResponse
-import java.time.LocalDateTime
-import kotlin.math.max
+import com.jwoglom.controlx2.util.HistoryLogSyncProgress
 
 @Composable
 fun HistoryLogSyncProgressBar(
-    historyLogViewModel: HistoryLogViewModel,
     modifier: Modifier = Modifier,
     hideWhenComplete: Boolean = false,
     replaceWithPaddingWhenComplete: Boolean = false
 ) {
     val ds = LocalDataStore.current
-    val historyLogStatus by ds.historyLogStatus.observeAsState()
+    val historyLogProgress by ds.historyLogSyncProgress.observeAsState()
 
-    historyLogStatus?.let { status ->
-        val pumpMaxSeqNum = status.lastSequenceNum
-        val pumpMinSeqNum = status.firstSequenceNum
-        
-        // Calculate the range we care about: the most recent 5000 sequence IDs
-        val targetMinSeqId = max(pumpMinSeqNum, pumpMaxSeqNum - 5000)
-        
-        // Get count of logs in DB above this threshold
-        val countAboveTargetSeqId = remember(historyLogViewModel, targetMinSeqId) {
-            historyLogViewModel.getCountAboveSeqId(targetMinSeqId)
-        }
-        val dbLogCount by countAboveTargetSeqId.observeAsState()
-        val syncedLogs = dbLogCount ?: 0L
-        
-        // Total logs is the count that should exist on the pump in this range
-        // If pumpMinSeqNum is within our target range, we only track from there
-        val effectiveMinSeqId = max(pumpMinSeqNum, targetMinSeqId)
-        val totalLogs = pumpMaxSeqNum - effectiveMinSeqId
-        
-        // Calculate progress (handle edge cases)
-        val progress = if (totalLogs > 0) {
-            (syncedLogs.toFloat() / totalLogs.toFloat()).coerceIn(0f, 1f)
-        } else {
-            1f
-        }
-        
-        val isSynced = syncedLogs >= totalLogs
+    historyLogProgress?.let { progress ->
+        val target = progress.target
+        val synced = progress.synced
+        val isSynced = target <= 0 || synced >= target
 
         if (replaceWithPaddingWhenComplete && isSynced) {
             Column(
@@ -88,6 +58,8 @@ fun HistoryLogSyncProgressBar(
         if (hideWhenComplete && isSynced) {
             return
         }
+
+        val fraction = if (target > 0) (synced.toFloat() / target.toFloat()).coerceIn(0f, 1f) else 1f
 
         Column(
             modifier = modifier
@@ -110,7 +82,7 @@ fun HistoryLogSyncProgressBar(
                     text = if (isSynced) {
                         "Synced"
                     } else {
-                        "$syncedLogs / $totalLogs"
+                        "$synced / $target"
                     },
                     style = MaterialTheme.typography.bodySmall,
                     fontSize = 12.sp,
@@ -121,20 +93,20 @@ fun HistoryLogSyncProgressBar(
                     }
                 )
             }
-            
+
             Spacer(modifier = Modifier.height(4.dp))
-            
+
             LinearProgressIndicator(
-                progress = { progress },
+                progress = { fraction },
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(8.dp),
             )
-            
-            if (!isSynced && totalLogs > 0) {
+
+            if (!isSynced && target > 0) {
                 Spacer(modifier = Modifier.height(2.dp))
                 Text(
-                    text = "${(progress * 100).toInt()}% complete (${totalLogs - syncedLogs} logs remaining)",
+                    text = "${(fraction * 100).toInt()}% complete (${target - synced} logs remaining)",
                     style = MaterialTheme.typography.bodySmall,
                     fontSize = 11.sp,
                     color = MaterialTheme.colorScheme.onSurfaceVariant
@@ -144,49 +116,18 @@ fun HistoryLogSyncProgressBar(
     }
 }
 
-// Preview helper function to create mock HistoryLogViewModel
-private fun createMockHistoryLogViewModel(maxSeqId: Long): HistoryLogViewModel {
-    val mockItems = (1L..maxSeqId).map { seqId ->
-        HistoryLogItem(
-            seqId = seqId,
-            pumpSid = 0,
-            typeId = 1,
-            cargo = ByteArray(0),
-            pumpTime = LocalDateTime.now(),
-            addedTime = LocalDateTime.now()
-        )
-    }.toMutableList()
-    return HistoryLogViewModel(HistoryLogRepo(HistoryLogDummyDao(mockItems)), 0)
-}
-
-// Preview helper to set up DataStore with mock HistoryLogStatusResponse
-private fun setupMockDataStore(dataStore: DataStore, firstSeqNum: Long, lastSeqNum: Long) {
-    // Create a mock HistoryLogStatusResponse
-    dataStore.historyLogStatus.value = object : HistoryLogStatusResponse() {
-        override fun getFirstSequenceNum(): Long = firstSeqNum
-        override fun getLastSequenceNum(): Long = lastSeqNum
-    }
-}
-
 @Preview(showBackground = true, name = "50% Synced")
 @Composable
 private fun HistoryLogSyncProgressBar_HalfSynced_Preview() {
-    val historyLogViewModel = createMockHistoryLogViewModel(5000)
-    
     ControlX2Theme {
         Surface(
             modifier = Modifier.fillMaxSize(),
             color = Color.White,
         ) {
             val dataStore = DataStore()
-            
-            // Mock: pump has logs 1-10000, DB has logs 1-5000 (50% synced)
-            setupMockDataStore(dataStore, 1, 10000)
-            
+            setMockProgress(dataStore, 10000, 5000)
             CompositionLocalProvider(LocalDataStore provides dataStore) {
-                HistoryLogSyncProgressBar(
-                    historyLogViewModel = historyLogViewModel
-                )
+                HistoryLogSyncProgressBar()
             }
         }
     }
@@ -195,22 +136,15 @@ private fun HistoryLogSyncProgressBar_HalfSynced_Preview() {
 @Preview(showBackground = true, name = "75% Synced")
 @Composable
 private fun HistoryLogSyncProgressBar_MostlySynced_Preview() {
-    val historyLogViewModel = createMockHistoryLogViewModel(7500)
-    
     ControlX2Theme {
         Surface(
             modifier = Modifier.fillMaxWidth(),
             color = Color.White,
         ) {
             val dataStore = DataStore()
-            
-            // Mock: pump has logs 1-10000, DB has logs 1-7500 (75% synced)
-            setupMockDataStore(dataStore, 1, 10000)
-            
+            setMockProgress(dataStore, 10000, 7500)
             CompositionLocalProvider(LocalDataStore provides dataStore) {
-                HistoryLogSyncProgressBar(
-                    historyLogViewModel = historyLogViewModel
-                )
+                HistoryLogSyncProgressBar()
             }
         }
     }
@@ -219,22 +153,15 @@ private fun HistoryLogSyncProgressBar_MostlySynced_Preview() {
 @Preview(showBackground = true, name = "Fully Synced")
 @Composable
 private fun HistoryLogSyncProgressBar_FullySynced_Preview() {
-    val historyLogViewModel = createMockHistoryLogViewModel(10000)
-    
     ControlX2Theme {
         Surface(
             modifier = Modifier.fillMaxWidth(),
             color = Color.White,
         ) {
             val dataStore = DataStore()
-            
-            // Mock: pump has logs 1-10000, DB has logs 1-10000 (100% synced)
-            setupMockDataStore(dataStore, 1, 10000)
-            
+            setMockProgress(dataStore, 10000, 10000)
             CompositionLocalProvider(LocalDataStore provides dataStore) {
-                HistoryLogSyncProgressBar(
-                    historyLogViewModel = historyLogViewModel
-                )
+                HistoryLogSyncProgressBar()
             }
         }
     }
@@ -242,23 +169,15 @@ private fun HistoryLogSyncProgressBar_FullySynced_Preview() {
 @Preview(showBackground = true, name = "Fully Synced Hidden")
 @Composable
 private fun HistoryLogSyncProgressBar_FullySyncedHidden_Preview() {
-    val historyLogViewModel = createMockHistoryLogViewModel(10000)
-
     ControlX2Theme {
         Surface(
             modifier = Modifier.fillMaxWidth(),
             color = Color.White,
         ) {
             val dataStore = DataStore()
-
-            // Mock: pump has logs 1-10000, DB has logs 1-10000 (100% synced)
-            setupMockDataStore(dataStore, 1, 10000)
-
+            setMockProgress(dataStore, 10000, 10000)
             CompositionLocalProvider(LocalDataStore provides dataStore) {
-                HistoryLogSyncProgressBar(
-                    historyLogViewModel = historyLogViewModel,
-                    hideWhenComplete = true
-                )
+                HistoryLogSyncProgressBar(hideWhenComplete = true)
             }
         }
     }
@@ -267,62 +186,40 @@ private fun HistoryLogSyncProgressBar_FullySyncedHidden_Preview() {
 @Preview(showBackground = true, name = "Just Started (10%)")
 @Composable
 private fun HistoryLogSyncProgressBar_JustStarted_Preview() {
-    val historyLogViewModel = createMockHistoryLogViewModel(1000)
-    
     ControlX2Theme {
         Surface(
             modifier = Modifier.fillMaxWidth(),
             color = Color.White,
         ) {
             val dataStore = DataStore()
-            
-            // Mock: pump has logs 1-10000, DB has logs 1-1000 (10% synced)
-            setupMockDataStore(dataStore, 1, 10000)
-            
+            setMockProgress(dataStore, 10000, 1000)
             CompositionLocalProvider(LocalDataStore provides dataStore) {
-                HistoryLogSyncProgressBar(
-                    historyLogViewModel = historyLogViewModel
-                )
+                HistoryLogSyncProgressBar()
             }
         }
     }
-}
-
-// Helper to create ViewModel for non-zero start preview (outside composable)
-private fun createNonZeroStartViewModel(): HistoryLogViewModel {
-    val mockItems = (5000L..8000L).map { seqId ->
-        HistoryLogItem(
-            seqId = seqId,
-            pumpSid = 0,
-            typeId = 1,
-            cargo = ByteArray(0),
-            pumpTime = LocalDateTime.now(),
-            addedTime = LocalDateTime.now()
-        )
-    }.toMutableList()
-    return HistoryLogViewModel(HistoryLogRepo(HistoryLogDummyDao(mockItems)), 0)
 }
 
 @Preview(showBackground = true, name = "With Non-Zero First Seq")
 @Composable
 private fun HistoryLogSyncProgressBar_NonZeroStart_Preview() {
-    val historyLogViewModel = createNonZeroStartViewModel()
-
     ControlX2Theme {
         Surface(
             modifier = Modifier.fillMaxWidth(),
             color = Color.White,
         ) {
             val dataStore = DataStore()
-            
-            // Mock: pump has logs 5000-10000, DB has logs 5000-8000 (60% synced)
-            setupMockDataStore(dataStore, 5000, 10000)
-            
+            // pump has logs 5000-10000 (5000 to fetch), 3000 fetched so far (~60%)
+            setMockProgress(dataStore, 5000, 3000)
             CompositionLocalProvider(LocalDataStore provides dataStore) {
-                HistoryLogSyncProgressBar(
-                    historyLogViewModel = historyLogViewModel
-                )
+                HistoryLogSyncProgressBar()
             }
         }
     }
+}
+
+// Preview helper: set the current sync-scope progress on the DataStore so the
+// progress bar renders the given target/synced pair.
+private fun setMockProgress(dataStore: DataStore, target: Long, synced: Long) {
+    dataStore.historyLogSyncProgress.value = HistoryLogSyncProgress(target, synced)
 }

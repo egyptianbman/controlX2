@@ -21,6 +21,13 @@ import java.lang.Long.max
 import java.lang.Long.min
 import java.time.LocalDateTime
 import java.time.ZoneId
+/**
+ * Progress of the current history-log sync scope. [target] is the number of records the
+ * active fetch is trying to bring into the DB (the records still missing when the scope
+ * opened); [synced] is how many of those are now populated. When [target] is 0 there is
+ * nothing to sync and the UI should hide the progress bar.
+ */
+data class HistoryLogSyncProgress(val target: Long, val synced: Long)
 
 const val InitialHistoryLogCount = 5000
 const val FetchGroupTimeoutMs = 4000
@@ -32,6 +39,7 @@ class HistoryLogFetcher(
     private val autoFetchEnabled: () -> Boolean = { true },
     private val canRequest: () -> Boolean = { true },
     private val broadcastCallback: ((HistoryLogItem) -> Unit)? = null,
+    private val progressCallback: ((HistoryLogSyncProgress) -> Unit)? = null,
     private val requestDelayMs: Long = 1000,
     private val pollIntervalMs: Long = 500,
     private val fetchGroupTimeoutMs: Long = FetchGroupTimeoutMs.toLong()
@@ -50,14 +58,16 @@ class HistoryLogFetcher(
         pumpSid: Int,
         pumpSession: PumpSession,
         autoFetchEnabled: () -> Boolean = { true },
-        broadcastCallback: ((HistoryLogItem) -> Unit)? = null
+        broadcastCallback: ((HistoryLogItem) -> Unit)? = null,
+        progressCallback: ((HistoryLogSyncProgress) -> Unit)? = null
     ) : this(
         historyLogRepo = historyLogRepo,
         pumpSid = pumpSid,
         commandSender = { start, count -> pumpSession.sendCommand(HistoryLogRequest(start, count)) },
         autoFetchEnabled = autoFetchEnabled,
         canRequest = { pumpSession.isActive },
-        broadcastCallback = broadcastCallback
+        broadcastCallback = broadcastCallback,
+        progressCallback = progressCallback
     )
 
     override fun cancel() {
@@ -147,6 +157,31 @@ class HistoryLogFetcher(
             Timber.i("HistoryLogFetcher.onStatusResponse<unlock>")
         }
     }
+    /**
+     * Publish progress for the current sync scope. [target] is the number of records the
+     * active fetch is trying to bring into the DB (the records still missing when the scope
+     * opened); [baseline] is how many of the window were already populated when it opened.
+     * [synced] is how many of the target are now populated (dbInWindow - baseline). A target
+     * of 0 means nothing to sync, so the UI should hide the progress bar.
+     */
+    private suspend fun publishSyncProgress(
+        target: Long,
+        baseline: Long,
+        winStart: Long,
+        winEnd: Long,
+    ) {
+        if (target <= 0) {
+            progressCallback?.invoke(HistoryLogSyncProgress(0, 0))
+            return
+        }
+        val dbInWindow = try {
+            historyLogRepo.getCount(pumpSid, winStart, winEnd).firstOrNull() ?: 0
+        } catch (e: Exception) {
+            0
+        }
+        val synced = (dbInWindow - baseline).coerceIn(0, target)
+        progressCallback?.invoke(HistoryLogSyncProgress(target, synced))
+    }
 
     private suspend fun onStatusResponseInternal(message: HistoryLogStatusResponse, scope: CoroutineScope) {
         Timber.i("HistoryLogFetcher.onStatusResponse")
@@ -194,6 +229,12 @@ class HistoryLogFetcher(
         }
 
         
+
+        // sync scope for the progress bar: target is the count still missing when this scope
+        // opened, baseline is how many of the window were already populated then, so synced
+        // (= dbInWindow - baseline) tracks only the current fetch, not the cumulative total.
+        val syncTarget = missingIdsTotal
+        val syncBaseline = (message.lastSequenceNum - startId + 1) - syncTarget
         Timber.i("HistoryLogFetcher.onStatusResponse: missingIds=${missingIdsTotal} $missingIds")
 
         scope.launch {
@@ -201,6 +242,7 @@ class HistoryLogFetcher(
                 Timber.i("HistoryLogFetcher.onStatusResponse: cancelled before launch")
                 return@launch
             }
+            publishSyncProgress(syncTarget, syncBaseline, startId, message.lastSequenceNum)
             Timber.i("HistoryLogFetcher.onStatusResponse: launching ranges: $missingIds (dbCount=$dbCount)")
             missingIds.reversed().forEach {
                 if (!shouldContinue()) {
@@ -208,7 +250,9 @@ class HistoryLogFetcher(
                     return@launch
                 }
                 triggerRange(it.first, it.last)
+                publishSyncProgress(syncTarget, syncBaseline, startId, message.lastSequenceNum)
             }
+            publishSyncProgress(syncTarget, syncBaseline, startId, message.lastSequenceNum)
             Timber.i("HistoryLogFetcher.onStatusResponse: completed, fetched $missingIdsTotal")
             val finalDbCount = historyLogRepo.getCount(pumpSid).firstOrNull() ?: 0
             Timber.i("HistoryLogFetcher.onStatusResponse: completed, ${finalDbCount - dbCount} actual: $dbCount -> $finalDbCount")

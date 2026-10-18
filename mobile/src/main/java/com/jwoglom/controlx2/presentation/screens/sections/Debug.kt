@@ -8,8 +8,13 @@ import android.content.Context
 import android.content.DialogInterface
 import android.os.Handler
 import android.os.Looper
+import android.text.Editable
+import android.text.TextWatcher
+import android.view.View
 import android.text.InputType
 import android.widget.EditText
+import android.graphics.Typeface
+import android.widget.TextView
 import android.widget.LinearLayout
 import android.widget.Toast
 import androidx.compose.foundation.background
@@ -81,7 +86,7 @@ import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.window.Popup
 import androidx.core.app.ShareCompat
 import androidx.navigation.NavHostController
-import com.google.android.material.slider.Slider
+import com.google.android.material.slider.RangeSlider
 import com.google.common.base.Splitter
 import com.jwoglom.pumpx2.pump.messages.Message
 import com.jwoglom.pumpx2.pump.messages.annotations.HistoryLogProps
@@ -125,9 +130,10 @@ import com.jwoglom.pumpx2.shared.JavaHelpers
 import com.jwoglom.controlx2.LocalDataStore
 import com.jwoglom.controlx2.Prefs
 import com.jwoglom.controlx2.dataStore
+import com.jwoglom.controlx2.util.HistoryLogSyncProgress
 import com.jwoglom.controlx2.db.historylog.HistoryLogDatabase
 import com.jwoglom.controlx2.db.historylog.HistoryLogRepo
-import com.jwoglom.controlx2.db.historylog.HistoryLogViewModel
+import com.jwoglom.controlx2.db.historylog.HistoryLogDao
 import com.jwoglom.controlx2.presentation.components.HeaderLine
 import com.jwoglom.controlx2.presentation.components.HistoryLogSyncProgressBar
 import com.jwoglom.controlx2.presentation.theme.ControlX2Theme
@@ -137,19 +143,28 @@ import com.jwoglom.controlx2.shared.util.SendType
 import com.jwoglom.controlx2.shared.util.shortTimeAgo
 import com.jwoglom.pumpx2.pump.PumpState
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.firstOrNull
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 import org.json.JSONArray
 import org.json.JSONObject
 import timber.log.Timber
 import java.io.File
+import java.lang.Long.min
 import java.lang.reflect.Constructor
 import java.lang.reflect.InvocationTargetException
 import java.time.Instant
+import java.time.ZoneOffset
+import kotlinx.coroutines.TimeoutCancellationException
+import kotlinx.coroutines.withTimeoutOrNull
+import java.time.format.DateTimeFormatter
 import java.util.stream.Collectors
-import kotlin.math.ceil
 import kotlin.math.max
-import kotlin.math.min
+import com.jwoglom.controlx2.util.HistoryLogAnchorManager
+import com.jwoglom.controlx2.util.HistoryLogAnchorLookup
 
 
 @Composable
@@ -158,7 +173,7 @@ fun Debug(
     navController: NavHostController? = null,
     sendMessage: (String, ByteArray) -> Unit,
     sendPumpCommands: (SendType, List<Message>) -> Unit,
-    historyLogViewModel: HistoryLogViewModel? = null,
+    anchorManager: HistoryLogAnchorManager = HistoryLogAnchorManager(LocalContext.current),
     navigateToFeatureFlags: () -> Unit = {},
 ) {
     val coroutineScope = rememberCoroutineScope()
@@ -296,10 +311,16 @@ fun Debug(
                                             triggerIDPSettingsDialog(context, sendPumpCommands)
                                             return@DropdownMenuItem
                                         } else if (className == HistoryLogRequest::class.java.name) {
-                                            triggerHistoryLogRequestDialog(
-                                                context,
-                                                sendPumpCommands
-                                            )
+                                            coroutineScope.launch {
+                                                triggerHistoryLogRequestDialog(
+                                                    context,
+                                                    sendPumpCommands,
+                                                    null,
+                                                    ds.pumpSid.value,
+                                                    coroutineScope,
+                                                    anchorManager
+                                                )
+                                            }
                                             return@DropdownMenuItem
                                         } else if (className == InitiateBolusRequest::class.java.name) {
                                             triggerInitiateBolusRequestDialog(
@@ -529,16 +550,13 @@ fun Debug(
             }
 
             // History Log Sync Progress Bar
-            historyLogViewModel?.let {
-                item {
-                    HistoryLogSyncProgressBar(
-                        historyLogViewModel = it,
-                        replaceWithPaddingWhenComplete = true
-                    )
-                }
-                item {
-                    Divider()
-                }
+            item {
+                HistoryLogSyncProgressBar(
+                    replaceWithPaddingWhenComplete = true
+                )
+            }
+            item {
+                Divider()
             }
 
             item {
@@ -568,7 +586,10 @@ fun Debug(
                             triggerHistoryLogRequestDialog(
                                 context,
                                 sendPumpCommands,
-                                dataStore.historyLogStatus.value
+                                dataStore.historyLogStatus.value,
+                                ds.pumpSid.value,
+                                coroutineScope,
+                                anchorManager = anchorManager,
                             )
                         }
                     }
@@ -1108,129 +1129,263 @@ fun triggerIDPSettingsDialog(
     builder.show()
 }
 
-fun triggerHistoryLogRequestDialog(
+const val HistoryLogPreloadTimeoutMs = 30_000L
+
+/**
+ * Range dialog for pulling a span of history-log rows, with human-readable dates.
+ *
+ * Two native sliders pick the start (oldest) and end (head) sequence IDs. Dates are shown by
+ * interpolating the sampled anchors via [HistoryLogAnchorLookup]; the anchors are preloaded during
+ * startup and here we ensure they're sampled, awaiting the sampler (already running or freshly
+ * started) with a timeout so the dialog never hangs. The request count reflects the full span, not
+ * how many rows already exist.
+ */
+suspend fun triggerHistoryLogRequestDialog(
     context: Context,
     sendPumpCommands: (SendType, List<Message>) -> Unit,
     historyLogStatus: HistoryLogStatusResponse? = null,
+    pumpSid: Int? = null,
+    scope: CoroutineScope,
+    anchorManager: HistoryLogAnchorManager,
 ) {
-    val builder = AlertDialog.Builder(context)
-    builder.setTitle("Enter start log ID")
-    builder.setMessage("Enter the ID of the first history log item to return:\n\n${historyLogStatus ?: ""}")
-    val input1 = EditText(context)
-    input1.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_NORMAL
-    input1.width = 200
-    if (historyLogStatus != null) {
-        input1.setText("${max(0, historyLogStatus.lastSequenceNum-255)}")
+    val status = historyLogStatus
+    if (status == null) {
+        Toast.makeText(context, "History status unavailable", Toast.LENGTH_SHORT).show()
+        return
     }
-    val layout = LinearLayout(context)
-    layout.addView(input1)
-
-    if (historyLogStatus != null) {
-        val slider = Slider(context)
-        slider.valueFrom = historyLogStatus.firstSequenceNum.toFloat()
-        slider.valueTo = historyLogStatus.lastSequenceNum.toFloat()
-        slider.value = max(0, historyLogStatus.lastSequenceNum-255).toFloat()
-        slider.stepSize = 1.0f
-        slider.addOnChangeListener { slider, value, fromUser -> input1.setText("${value.toLong()}") }
-        layout.addView(slider)
-    }
-
-    builder.setView(layout)
-    builder.setPositiveButton("OK") { dialog, which ->
-        val startLog = input1.text.toString()
-        Timber.i("startLog id: %s", startLog)
-        val builder2 = AlertDialog.Builder(context)
-        builder2.setTitle("Enter number of logs")
-        builder2.setMessage("Enter the max number of logs to return")
-        val input2 = EditText(context)
-        input2.inputType = InputType.TYPE_CLASS_NUMBER or InputType.TYPE_NUMBER_VARIATION_NORMAL
-        if (historyLogStatus != null) {
-            input2.setText("${min(startLog.toLong()+255, historyLogStatus.lastSequenceNum)-startLog.toLong()}")
-        }
-        builder2.setView(input2)
-
-        if (historyLogStatus != null) {
-            builder2.setNeutralButton("Get All") { dialog, which ->
-                triggerHistoryLogRangePrompt(context, sendPumpCommands, startLog.toLong(), historyLogStatus.lastSequenceNum)
-            }
-        }
-        builder2.setPositiveButton(
-            "OK"
-        ) { dialog, which ->
-            val maxLogs = input2.text.toString()
-            Timber.i("max logs: %s", maxLogs)
-            triggerHistoryLogRangePrompt(context, sendPumpCommands, startLog.toLong(), startLog.toLong()+maxLogs.toLong())
-
-        }
-        builder2.setNegativeButton(
-            "Cancel"
-        ) { dialog, which -> dialog.cancel() }
-        builder2.show()
-    }
-    builder.setNegativeButton(
-        "Cancel"
-    ) { dialog, which -> dialog.cancel() }
-    builder.show()
-}
-
-fun triggerHistoryLogRangePrompt(
-    context: Context,
-    sendPumpCommands: (SendType, List<Message>) -> Unit,
-    startLog: Long,
-    endLog: Long
-) {
-    if (endLog - startLog in 0..255) {
-        // HistoryLogRequest returns items backward from the start ID,
-        // so we request from the END of the range to get all items in [startLog, endLog]
-        sendPumpCommands(
-            SendType.STANDARD,
-            listOf(
-                HistoryLogRequest(endLog, (endLog - startLog).toInt())
-            )
-        )
+    val sid = pumpSid
+    if (sid == null) {
+        Toast.makeText(context, "Pump not connected - no pumpSid", Toast.LENGTH_SHORT).show()
         return
     }
 
-    val chunkCount = ceil(((endLog - startLog) / 255).toDouble())
-    AlertDialog.Builder(context)
-        .setTitle("History Log Request")
-        .setMessage("Sequence number range $startLog - $endLog will require $chunkCount chunks. Continue?")
-        .setPositiveButton("OK") { dialog, which ->
-            Handler(Looper.getMainLooper()).post {
-                triggerHistoryLogRange(context, sendPumpCommands, startLog, endLog)
-            }
+    // Ensure date anchors are sampled, awaiting the sampler (already running or freshly started)
+    // with a timeout. A missing/empty result degrades gracefully to IDs-only.
+    val lookup: HistoryLogAnchorLookup = try {
+        val progress = AlertDialog.Builder(context)
+            .setTitle("Preparing history")
+            .setMessage("Loading date references\u2026")
+            .setCancelable(false)
+            .show()
+        try {
+            val ready = anchorManager.ensureLoaded(sid)
+            withTimeoutOrNull(HistoryLogPreloadTimeoutMs) { ready.await() }
+            // anchors() is a Room query; read it off the main thread once sampling has settled.
+            val anchors = withContext(Dispatchers.IO) { anchorManager.anchors(sid) }
+            HistoryLogAnchorLookup(anchors)
+        } finally {
+            progress.dismiss()
         }
-        .setNegativeButton("Cancel") { dialog, which -> dialog.cancel() }
-        .show()
+    } catch (e: TimeoutCancellationException) {
+        Timber.w("HistoryLogAnchor preload timed out after ${HistoryLogPreloadTimeoutMs}ms; IDs only")
+        Toast.makeText(
+            context,
+            "Date references timed out \u2014 showing sequence IDs only",
+            Toast.LENGTH_SHORT
+        ).show()
+        HistoryLogAnchorLookup(emptyList())
+    }
+
+    val first = status.firstSequenceNum
+    val head = status.lastSequenceNum
+
+    val builder = AlertDialog.Builder(context)
+    builder.setTitle("Get history logs")
+
+    val layout = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
+
+    // Range slider: two native handles pick the start (oldest) and end (head) IDs. RangeSlider
+    // keeps the thumbs ordered, so start never runs past end.
+    layout.addView(divider(context))
+    layout.addView(instructions(context, "Drag the two handles to select the range of history to fetch."))
+    val rangeSlider = RangeSlider(context).apply {
+        valueFrom = first.toFloat()
+        valueTo = head.toFloat()
+        values = mutableListOf(first.toFloat(), head.toFloat())
+        stepSize = 1.0f
+    }
+    layout.addView(rangeSlider)
+
+    // Info table: start/end/head/requests, kept current as either slider moves.
+    val startRow = infoRow(context, "Start", formatAnchor(first, lookup))
+    val endRow = infoRow(context, "End", formatAnchor(head, lookup))
+    val headRow = infoRow(context, "Head", formatAnchor(head, lookup))
+    val reqRow = infoRow(context, "Requests", "~${requestCount(first, head)}")
+    layout.addView(startRow.first)
+    layout.addView(endRow.first)
+    layout.addView(headRow.first)
+    layout.addView(reqRow.first)
+
+    // Live updates: keep id/date labels and the request count current. RangeSlider keeps the thumbs
+    // ordered, so start never runs past end without manual clamping.
+    fun refresh() {
+        val vs = rangeSlider.values
+        val s = vs[0].toLong()
+        val e = vs[1].toLong()
+        startRow.second.text = formatAnchor(s, lookup)
+        endRow.second.text = formatAnchor(e, lookup)
+        reqRow.second.text = "~${requestCount(s, e)}"
+    }
+    rangeSlider.addOnChangeListener { _, _, _ -> refresh() }
+
+    builder.setView(layout)
+    builder.setPositiveButton("Fetch") { _, _ ->
+        val vs = rangeSlider.values
+        val startId = vs[0].toLong()
+        val endId = vs[1].toLong()
+        // Fetch the full span from start to end. triggerHistoryLogRange walks it end-to-start, so
+        // every HistoryLogRequest stays within the pump's history; no head cap, the user can pull
+        // the entire fetched range.
+        val reqCount = requestCount(startId, endId)
+        Toast.makeText(
+            context,
+            "Fetching IDs $startId\u2013$endId (~$reqCount request(s))",
+            Toast.LENGTH_SHORT
+        ).show()
+        // A new range cancels the running fetch so the two don't overlap the pump's history.
+        dataStore.historyLogFetchJob.value?.cancel()
+        dataStore.historyLogFetchJob.value = scope.launch {
+            triggerHistoryLogRange(
+                context,
+                sendPumpCommands,
+                startId,
+                endId,
+                sid,
+                progressCallback = { target, synced ->
+                    dataStore.historyLogSyncProgress.value = HistoryLogSyncProgress(target, synced)
+                }
+            )
+        }
+    }
+    builder.setNegativeButton("Cancel") { dialog, which -> dialog.cancel() }
+    builder.show()
 }
 
-fun triggerHistoryLogRange(
+private fun formatAnchor(id: Long, lookup: HistoryLogAnchorLookup): String {
+    val date = lookup.dateForId(id)
+    return if (date != null) "$id  \u00b7  ${date.format(ANCHOR_DATE_FORMAT)}" else id.toString()
+}
+
+private val ANCHOR_DATE_FORMAT = DateTimeFormatter.ofPattern("MMM dd, yyyy HH:mm")
+
+/** Request batches of 256 IDs, matching triggerHistoryLogRange's chunk size (ceil over the span). */
+private fun requestCount(startId: Long, endId: Long): Long {
+    val span = endId - startId + 1
+    return if (span <= 0) 0 else (span + 255) / 256
+}
+
+/** Two-column info row: a bold label and a value that fills the remaining width. */
+private fun infoRow(context: Context, label: String, value: String): Pair<View, TextView> {
+    val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
+    val labelView = TextView(context).apply {
+        this.text = label
+        setTypeface(null, Typeface.BOLD)
+        setPadding(0, 0, context.dp(16), 0)
+    }
+    val valueView = TextView(context).apply {
+        this.text = value
+        layoutParams = LinearLayout.LayoutParams(
+            0,
+            LinearLayout.LayoutParams.WRAP_CONTENT,
+            1f
+        )
+    }
+    row.addView(labelView)
+    row.addView(valueView)
+    return Pair(row, valueView)
+}
+
+private fun Context.dp(value: Int): Int =
+    (value * resources.displayMetrics.density).toInt()
+
+private fun sectionHeading(context: Context, text: String): TextView {
+    return TextView(context).apply {
+        this.text = text
+        setTypeface(null, Typeface.BOLD)
+        setPadding(0, 4, 0, 12)
+    }
+}
+private fun instructions(context: Context, text: String): TextView =
+    TextView(context).apply {
+        this.text = text
+        setTypeface(null, Typeface.NORMAL)
+        // Muted gray so it reads as guidance, not a field label.
+        setTextColor(0xFF9E9E9E.toInt())
+    }
+
+private fun divider(context: Context): View {
+    val h = (2 * context.resources.displayMetrics.density).toInt()
+    val v = View(context)
+    v.layoutParams = LinearLayout.LayoutParams(
+        LinearLayout.LayoutParams.MATCH_PARENT, h
+    ).apply {
+        topMargin = (10 * context.resources.displayMetrics.density).toInt()
+        bottomMargin = (10 * context.resources.displayMetrics.density).toInt()
+    }
+    v.setBackgroundColor(0xFFE0E0E0.toInt())
+    return v
+}
+
+suspend fun triggerHistoryLogRange(
     context: Context,
     sendPumpCommands: (SendType, List<Message>) -> Unit,
     startLog: Long,
-    endLog: Long
-)  {
+    endLog: Long,
+    pumpSid: Int,
+    progressCallback: ((target: Long, synced: Long) -> Unit)? = null,
+    chunkSize: Int = 256,
+    requestDelayMs: Long = 500,
+    pollIntervalMs: Long = 500,
+    groupTimeoutMs: Long = 8000,
+) {
+    // Progress = fraction of the requested range handled. Chunks already fully in the DB are skipped
+    // (no pump ping) and counted as handled; fetched chunks count as they're sent. The bar starts at
+    // 0 and reaches 100% once the whole range is covered -- so re-fetching an in-range set is fast.
+    val target = endLog - startLog + 1
+    val totalNums = (target + chunkSize - 1) / chunkSize
     var num = 0
-    var totalNums = 1
-    for (i in startLog..endLog step 256) {
-        val localNum = num
-        val count = if (i+255 > endLog) (endLog - i).toInt() else 255
-        val endI = i + count - 1
-        Handler(Looper.getMainLooper()).postDelayed({
-            Timber.i("HistoryLogRequest ${localNum+1} from $i to $endI count=$count")
-            // HistoryLogRequest returns items backward from the start ID,
-            // so we request from the END of the range to get all items in [i, endI]
-            sendPumpCommands(
-                SendType.STANDARD,
-                listOf(
-                    HistoryLogRequest(endI, count)
-                )
-            )
-            Toast.makeText(context, "${localNum+1}/${totalNums}: Requesting $i to $endI", Toast.LENGTH_SHORT).show()
-        }, localNum.toLong() * 7000)
+    var requested = 0L
+    progressCallback?.invoke(target, requested)
+    val dao = HistoryLogDatabase.getDatabase(context).historyLogDao()
+
+    // HistoryLogRequest returns items BACKWARD from the start ID, so walk the range from its END
+    // downward, requesting each chunk from the top so we pull down to chunkStart.
+    var i = endLog
+    while (i >= startLog) {
+        val count = min(chunkSize.toLong(), i - startLog + 1).toInt()
+        val chunkEnd = i
+        val chunkStart = i - count + 1
+        // Skip chunks already fully in the DB -- don't re-ping the pump for IDs we already have.
+        val dbCount = dao.getCount(pumpSid, chunkStart, chunkEnd).firstOrNull() ?: 0
+        if (dbCount >= count) {
+            Timber.i("HistoryLogRange: chunk $chunkStart..$chunkEnd already present ($dbCount/$count), skipping")
+            num++
+            requested += count
+            progressCallback?.invoke(target, requested)
+            i = chunkStart - 1
+            continue
+        }
         num++
-        totalNums++
+        requested += count
+        Timber.i("HistoryLogRequest $num/$totalNums from $chunkStart to $chunkEnd count=$count")
+        sendPumpCommands(SendType.STANDARD, listOf(HistoryLogRequest(chunkEnd, count)))
+        progressCallback?.invoke(target, requested)
+        Toast.makeText(context, "$num/$totalNums: Requesting $chunkStart to $chunkEnd", Toast.LENGTH_SHORT).show()
+
+        // Wait for the pump to deliver this chunk (up to a timeout) before requesting the next, so we
+        // keep backpressure and do not flood the BLE link.
+        delay(requestDelayMs)
+        var waitTimeMs = 0L
+        while (waitTimeMs < groupTimeoutMs) {
+            delay(pollIntervalMs)
+            waitTimeMs += pollIntervalMs
+            val dbCount = dao.getCount(pumpSid, chunkStart, chunkEnd).firstOrNull() ?: 0
+            if (dbCount >= count) break
+        }
+        i = chunkStart - 1
     }
+    progressCallback?.invoke(target, requested)
+    Toast.makeText(context, "History fetch complete — IDs $startLog to $endLog", Toast.LENGTH_SHORT).show()
 }
 
 fun triggerInitiateBolusRequestDialog(

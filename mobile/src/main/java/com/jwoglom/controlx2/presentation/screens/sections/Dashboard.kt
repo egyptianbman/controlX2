@@ -239,13 +239,10 @@ fun Dashboard(
                 }
 
                 // History Log Sync Progress
-                historyLogViewModel?.let {
-                    item {
-                        HistoryLogSyncProgressBar(
-                            historyLogViewModel = it,
-                            replaceWithPaddingWhenComplete = true
-                        )
-                    }
+                item {
+                    HistoryLogSyncProgressBar(
+                        replaceWithPaddingWhenComplete = true
+                    )
                 }
             }
         )

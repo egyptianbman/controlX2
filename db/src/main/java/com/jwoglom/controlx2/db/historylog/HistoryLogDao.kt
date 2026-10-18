@@ -12,6 +12,14 @@ data class HistoryLogTypeStats(
     val latestSeqId: Long?,
     val latestPumpTimeSec: Long?
 )
+data class SeqIdPumpTime(
+    val seqId: Long,
+    val pumpTimeSec: Long
+)
+data class HistoryLogSeqRange(
+    val minSeqId: Long?,
+    val maxSeqId: Long?,
+)
 
 @Dao
 interface HistoryLogDao {
@@ -35,6 +43,9 @@ interface HistoryLogDao {
         AND seqId >= :minSeqId
     """)
     fun getCountAboveSeqId(pumpSid: Int, minSeqId: Long): Flow<Long?>
+    /** Min/max seqId present for [pumpSid] — the DB's actual history span, for anchor sampling. */
+    @Query("SELECT MIN(seqId) AS minSeqId, MAX(seqId) AS maxSeqId FROM $HistoryLogTable WHERE pumpSid = :pumpSid")
+    fun getSeqRange(pumpSid: Int): Flow<HistoryLogSeqRange?>
 
     @Query("""
         SELECT DISTINCT seqId
@@ -45,6 +56,11 @@ interface HistoryLogDao {
         ORDER BY seqId ASC
     """)
     fun getAllIds(pumpSid: Int, min: Long, max: Long): List<Long>
+
+    // Closest real seqId at or below [target] with its pump clock. The anchor sampler uses this to
+    // record a dated reference even when the exact sample ID is missing (retention gaps).
+    @Query("SELECT seqId AS seqId, pumpTimeSec AS pumpTimeSec FROM $HistoryLogTable WHERE pumpSid = :pumpSid AND seqId <= :target ORDER BY seqId DESC LIMIT 1")
+    fun getClosestAtOrBelow(pumpSid: Int, target: Long): SeqIdPumpTime?
 
     @Query("""
         SELECT * FROM $HistoryLogTable

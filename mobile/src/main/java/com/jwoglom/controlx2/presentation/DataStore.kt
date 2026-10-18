@@ -1,6 +1,8 @@
 package com.jwoglom.controlx2.presentation
-
+import android.os.Handler
+import android.os.Looper
 import androidx.lifecycle.MutableLiveData
+import kotlinx.coroutines.Job
 import com.jwoglom.pumpx2.pump.bluetooth.PumpReadyState
 import com.jwoglom.pumpx2.pump.messages.Message
 import com.jwoglom.pumpx2.pump.messages.calculator.BolusCalcCondition
@@ -20,6 +22,7 @@ import com.jwoglom.pumpx2.pump.messages.response.currentStatus.LastBolusStatusAb
 import com.jwoglom.pumpx2.pump.messages.response.currentStatus.LoadStatusResponse
 import com.jwoglom.pumpx2.pump.messages.response.currentStatus.TimeSinceResetResponse
 import com.jwoglom.pumpx2.pump.messages.response.historyLog.HistoryLog
+import com.jwoglom.controlx2.util.HistoryLogSyncProgress
 import com.jwoglom.controlx2.presentation.screens.PumpSetupStage
 import com.jwoglom.controlx2.shared.enums.BasalStatus
 import com.jwoglom.controlx2.shared.enums.CGMSessionState
@@ -140,6 +143,11 @@ class DataStore {
 
     val historyLogStatus = MutableLiveData<HistoryLogStatusResponse>()
 
+    val historyLogSyncProgress = MutableLiveData<HistoryLogSyncProgress>()
+
+    // In-flight history-log fetch, so a new range cancels the running one instead of overlapping.
+    val historyLogFetchJob = MutableLiveData<Job?>()
+
     val historyLogCache = MutableLiveData<MutableMap<Long, HistoryLog>>(mutableMapOf())
     val debugMessageCache = MutableLiveData<List<Pair<Message, Instant>>>()
     val debugPromptAwaitingResponses = MutableLiveData<MutableSet<String>>()
@@ -149,12 +157,23 @@ class DataStore {
     private fun <T> MutableLiveData<T>.logOnChange(fieldName: String) {
         var initialized = false
         var previous: Any? = null
-        observeForever { current ->
+        // observeForever must run on the main thread, but DataStore may be constructed on a
+        // background thread (e.g. the history-log fetcher callback). Defer registration to the
+        // main looper when called off it, so the class static-init can't crash the process.
+        val observer: (T) -> Unit = { current ->
             if (!initialized || previous != current) {
                 Timber.d("DataStore.$fieldName=$current")
                 previous = current
                 initialized = true
             }
+        }
+        if (Looper.myLooper() != Looper.getMainLooper()) {
+            // observeForever must run on the main thread, but DataStore may be constructed on a
+            // background thread (e.g. the history-log fetcher callback). Defer registration so the
+            // class static-init can't crash the process.
+            Handler(Looper.getMainLooper()).post { observeForever(observer) }
+        } else {
+            observeForever(observer)
         }
     }
 
@@ -253,6 +272,8 @@ class DataStore {
         pumpingState.logOnChange("pumpingState")
 
         historyLogStatus.logOnChange("historyLogStatus")
+
+        historyLogSyncProgress.logOnChange("historyLogSyncProgress")
 
         historyLogCache.logOnChange("historyLogCache")
         debugMessageCache.logOnChange("debugMessageCache")

@@ -10,10 +10,12 @@ import androidx.sqlite.db.SupportSQLiteDatabase
 import com.jwoglom.controlx2.db.util.Converters
 
 
-@Database(entities = [HistoryLogItem::class], version = 3, exportSchema = false)
+@Database(entities = [HistoryLogItem::class, HistoryLogAnchorItem::class], version = 4, exportSchema = false)
 @TypeConverters(Converters::class)
 abstract class HistoryLogDatabase : RoomDatabase() {
     abstract fun historyLogDao(): HistoryLogDao
+
+    abstract fun historyLogAnchorDao(): HistoryLogAnchorDao
 
     companion object {
         @Volatile
@@ -25,7 +27,7 @@ abstract class HistoryLogDatabase : RoomDatabase() {
                         context.applicationContext,
                         HistoryLogDatabase::class.java,
                         HistoryLogTable
-                    ).addMigrations(DbMigration1_2, DbMigration2_3)
+                    ).addMigrations(DbMigration1_2, DbMigration2_3, DbMigration3_4)
                     .build()
                 INSTANCE = instance
                 return instance
@@ -53,6 +55,19 @@ val DbMigration2_3: Migration = object : Migration(2, 3) {
         // So: pumpTimeSec = (storedMillis / 1000) - 1199145600
         database.execSQL(
             "UPDATE $HistoryLogTable SET pumpTimeSec = (pumpTime / 1000) - 1199145600"
+        )
+    }
+}
+
+val DbMigration3_4: Migration = object : Migration(3, 4) {
+    override fun migrate(database: SupportSQLiteDatabase) {
+        // Anchor table: sampled (seqId -> pump clock) points for ID->date interpolation.
+        database.execSQL(
+            "CREATE TABLE IF NOT EXISTS $HistoryLogAnchorTable (" +
+            "pumpSid INTEGER NOT NULL, " +
+            "anchorId INTEGER NOT NULL, " +
+            "pumpTimeSec INTEGER NOT NULL, " +
+            "PRIMARY KEY (pumpSid, anchorId))"
         )
     }
 }

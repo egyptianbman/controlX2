@@ -16,10 +16,21 @@ class HistoryLogDummyDao(val data: MutableList<HistoryLogItem>) : HistoryLogDao 
         data.count { it.pumpSid == pumpSid && it.seqId >= minSeqId }.toLong()
     )
 
+    override fun getSeqRange(pumpSid: Int): Flow<HistoryLogSeqRange?> = flowOf(
+        data.filter { it.pumpSid == pumpSid }.let { items ->
+            if (items.isEmpty()) null else HistoryLogSeqRange(items.minOf { it.seqId }, items.maxOf { it.seqId })
+        }
+    )
+
     override fun getAllIds(pumpSid: Int, min: Long, max: Long): List<Long> =
         data.filter { it.pumpSid == pumpSid && it.seqId in min..max }
             .sortedBy { it.seqId }
             .map { it.seqId }
+
+    override fun getClosestAtOrBelow(pumpSid: Int, target: Long): SeqIdPumpTime? =
+        data.filter { it.pumpSid == pumpSid && it.seqId <= target }
+            .maxByOrNull { it.seqId }
+            ?.let { SeqIdPumpTime(it.seqId, it.pumpTimeSec) }
 
     override fun getAll(pumpSid: Int): Flow<List<HistoryLogItem>> = flowOf(
         data.filter { it.pumpSid == pumpSid }.sortedBy { it.seqId }

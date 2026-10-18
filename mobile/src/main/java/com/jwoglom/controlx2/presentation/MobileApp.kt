@@ -9,6 +9,7 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import androidx.navigation.compose.rememberNavController
+import androidx.compose.ui.platform.LocalContext
 import com.jwoglom.controlx2.db.historylog.HistoryLogViewModel
 import com.jwoglom.pumpx2.pump.messages.Message
 import com.jwoglom.pumpx2.pump.messages.calculator.BolusCalcUnits
@@ -23,6 +24,7 @@ import com.jwoglom.controlx2.presentation.screens.Landing
 import com.jwoglom.controlx2.presentation.screens.PumpSetup
 import com.jwoglom.controlx2.presentation.theme.ControlX2Theme
 import com.jwoglom.controlx2.shared.util.SendType
+import com.jwoglom.controlx2.util.HistoryLogAnchorManager
 
 @Composable
 fun MobileApp(
@@ -32,6 +34,7 @@ fun MobileApp(
     sendPumpCommands: (SendType, List<Message>) -> Unit,
     sendServiceBolusRequest: (Int, BolusParameters, BolusCalcUnits, BolusCalcDataSnapshotResponse, TimeSinceResetResponse) -> Unit,
     sendServiceBolusCancel: () -> Unit,
+    anchorManager: HistoryLogAnchorManager = HistoryLogAnchorManager(LocalContext.current),
     historyLogViewModel: HistoryLogViewModel? = null,
     sheetLaunchRequest: SheetLaunchRequest? = null,
     onSheetLaunchHandled: (Long) -> Unit = {},
@@ -70,6 +73,7 @@ fun MobileApp(
                     sendServiceBolusRequest = sendServiceBolusRequest,
                     sendServiceBolusCancel = sendServiceBolusCancel,
                     historyLogViewModel = historyLogViewModel,
+                    anchorManager = anchorManager,
                     sheetLaunchRequest = sheetLaunchRequest,
                     onSheetLaunchHandled = onSheetLaunchHandled,
                 )

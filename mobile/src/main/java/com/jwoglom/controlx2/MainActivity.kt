@@ -48,6 +48,7 @@ import com.jwoglom.controlx2.presentation.screens.PumpSetupStage
 import com.jwoglom.controlx2.presentation.screens.sections.messagePairToJson
 import com.jwoglom.controlx2.presentation.screens.sections.verbosePumpMessage
 import com.jwoglom.controlx2.presentation.util.ShouldLogToFile
+import com.jwoglom.controlx2.util.HistoryLogAnchorManager
 import com.jwoglom.controlx2.shared.MessagePaths
 import com.jwoglom.controlx2.shared.PumpMessageSerializer
 import com.jwoglom.pumpx2.shared.Hex
@@ -152,6 +153,7 @@ class MainActivity : ComponentActivity() {
     private val applicationScope = CoroutineScope(SupervisorJob())
     private val historyLogDb by lazy { HistoryLogDatabase.getDatabase(this) }
     private val historyLogRepo by lazy { HistoryLogRepo(historyLogDb.historyLogDao()) }
+    private val anchorManager by lazy { HistoryLogAnchorManager(this) }
     // hack: the ViewModel references the current pumpSid, so that streaming works in the UI, which we store lazily in the app preferences
     private val historyLogViewModel: HistoryLogViewModel by viewModels {
         HistoryLogViewModelFactory(historyLogRepo, Prefs(applicationContext).currentPumpSid())
@@ -195,6 +197,7 @@ class MainActivity : ComponentActivity() {
                     )
                 },
                 historyLogViewModel = historyLogViewModel,
+                anchorManager = anchorManager,
                 sheetLaunchRequest = sheetLaunchRequestState.value,
                 onSheetLaunchHandled = { handledRequestId ->
                     if (sheetLaunchRequestState.value?.requestId == handledRequestId) {
@@ -986,6 +989,8 @@ class MainActivity : ComponentActivity() {
             }
             is HistoryLogStatusResponse -> {
                 dataStore.historyLogStatus.value = message
+                // Preload date anchors during startup so the history dialog shows dates immediately.
+                anchorManager.ensureLoaded(dataStore.pumpSid.value ?: 0)
             }
             is BolusPermissionResponse -> {
                 dataStore.bolusPermissionResponse.value = message

@@ -529,7 +529,16 @@ class CommService : Service(), CommServiceCallbacks {
             pumpSid = pumpSid,
             pumpSession = pumpSession,
             autoFetchEnabled = autoFetchEnabled,
-            broadcastCallback = { item -> httpDebugApiService?.onHistoryLogInsertedCallback?.invoke(item) }
+            broadcastCallback = { item -> httpDebugApiService?.onHistoryLogInsertedCallback?.invoke(item) },
+            progressCallback = { progress ->
+                if (Looper.myLooper() != Looper.getMainLooper()) {
+                    Handler(Looper.getMainLooper()).post {
+                        dataStore.historyLogSyncProgress.value = progress
+                    }
+                } else {
+                    dataStore.historyLogSyncProgress.value = progress
+                }
+            }
         )
     }
 

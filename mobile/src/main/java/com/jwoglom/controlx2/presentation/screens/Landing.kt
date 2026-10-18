@@ -96,6 +96,7 @@ import com.jwoglom.controlx2.presentation.screens.sections.resetTempRateDataStor
 import com.jwoglom.controlx2.presentation.navigation.SheetLaunchRequest
 import com.jwoglom.controlx2.presentation.navigation.SheetLaunchTarget
 import com.jwoglom.controlx2.presentation.navigation.TempRateInputPrefill
+import com.jwoglom.controlx2.util.HistoryLogAnchorManager
 import com.jwoglom.controlx2.presentation.theme.Colors
 import com.jwoglom.controlx2.presentation.theme.ControlX2Theme
 import com.jwoglom.controlx2.shared.enums.BasalStatus
@@ -113,6 +114,7 @@ fun Landing(
     sendPumpCommands: (SendType, List<Message>) -> Unit,
     sendServiceBolusRequest: (Int, BolusParameters, BolusCalcUnits, BolusCalcDataSnapshotResponse, TimeSinceResetResponse) -> Unit,
     sendServiceBolusCancel: () -> Unit,
+    anchorManager: HistoryLogAnchorManager = HistoryLogAnchorManager(LocalContext.current),
     sectionState: LandingSection = LandingSection.DASHBOARD,
     bottomScaffoldDisplayState: BottomSheetValue = BottomSheetValue.Collapsed,
     _bottomScaffoldState: BottomScaffoldState = BottomScaffoldState.NONE,
@@ -438,7 +440,7 @@ fun Landing(
                                 navController = navController,
                                 sendMessage = sendMessage,
                                 sendPumpCommands = sendPumpCommands,
-                                historyLogViewModel = historyLogViewModel,
+                                anchorManager = anchorManager,
                                 navigateToFeatureFlags = {
                                     selectedItem = LandingSection.FEATURE_FLAGS
                                 },
