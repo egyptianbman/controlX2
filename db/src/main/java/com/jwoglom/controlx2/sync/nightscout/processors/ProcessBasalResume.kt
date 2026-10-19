@@ -41,7 +41,7 @@ class ProcessBasalResume(
         // Convert history logs to Nightscout treatments
         val treatments = logs.mapNotNull { item ->
             try {
-                resumeToNightscoutTreatment(item)
+                resumeToNightscoutTreatment(item, config)
             } catch (e: Exception) {
                 Timber.e(e, "Failed to convert basal resume seqId=${item.seqId}")
                 null
@@ -61,7 +61,7 @@ class ProcessBasalResume(
         }
     }
 
-    private fun resumeToNightscoutTreatment(item: HistoryLogItem): NightscoutTreatment? {
+    private fun resumeToNightscoutTreatment(item: HistoryLogItem, config: NightscoutSyncConfig): NightscoutTreatment? {
         val parsed = item.parse()
 
         return when (parsed) {
@@ -72,7 +72,7 @@ class ProcessBasalResume(
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
                     reason = "Pumping resumed",
-                    notes = "Pumping resumed, IOB: ${insulinAmount}U"
+                    notes = config.buildNotes { append("Pumping resumed, IOB: ${insulinAmount}U") }
                 )
             }
             is HypoMinimizerResumeHistoryLog -> {
@@ -81,7 +81,7 @@ class ProcessBasalResume(
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
                     reason = "Hypo Minimizer resume",
-                    notes = "Hypo Minimizer resume, reason code: ${parsed.reason}"
+                    notes = config.buildNotes { append("Hypo Minimizer resume, reason code: ${parsed.reason}") }
                 )
             }
             else -> {

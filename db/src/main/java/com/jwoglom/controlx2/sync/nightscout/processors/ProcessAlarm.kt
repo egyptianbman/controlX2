@@ -45,7 +45,7 @@ class ProcessAlarm(
         // Convert history logs to Nightscout treatments
         val treatments = logs.mapNotNull { item ->
             try {
-                alarmToNightscoutTreatment(item)
+                alarmToNightscoutTreatment(item, config)
             } catch (e: Exception) {
                 Timber.e(e, "Failed to convert alarm seqId=${item.seqId}")
                 null
@@ -65,7 +65,7 @@ class ProcessAlarm(
         }
     }
 
-    private fun alarmToNightscoutTreatment(item: HistoryLogItem): NightscoutTreatment? {
+    private fun alarmToNightscoutTreatment(item: HistoryLogItem, config: NightscoutSyncConfig): NightscoutTreatment? {
         val parsed = item.parse()
 
         return when (parsed) {
@@ -82,7 +82,7 @@ class ProcessAlarm(
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
                     reason = reason,
-                    notes = "Pump alarm activated, ID: ${parsed.alarmId}"
+                    notes = config.buildNotes { append("Pump alarm activated, ID: ${parsed.alarmId}") }
                 )
             }
             is AlarmClearedHistoryLog -> {
@@ -98,7 +98,7 @@ class ProcessAlarm(
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
                     reason = reason,
-                    notes = "Pump alarm cleared, ID: ${parsed.alarmId}"
+                    notes = config.buildNotes { append("Pump alarm cleared, ID: ${parsed.alarmId}") }
                 )
             }
             is AlertActivatedHistoryLog -> {
@@ -114,7 +114,7 @@ class ProcessAlarm(
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
                     reason = reason,
-                    notes = "Pump alert activated, ID: ${parsed.alertId}"
+                    notes = config.buildNotes { append("Pump alert activated, ID: ${parsed.alertId}") }
                 )
             }
             is AlertClearedHistoryLog -> {
@@ -130,7 +130,7 @@ class ProcessAlarm(
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
                     reason = reason,
-                    notes = "Pump alert cleared, ID: ${parsed.alertId}"
+                    notes = config.buildNotes { append("Pump alert cleared, ID: ${parsed.alertId}") }
                 )
             }
             else -> {

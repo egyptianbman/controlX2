@@ -76,7 +76,7 @@ class ProcessBasal(
                 originalDurationMinutes
             }
 
-            val notes = buildString {
+            val notes = config.buildNotes {
                 append("Temp basal ${activated.percent}%")
                 if (completion != null && completion.second.timeLeft > 0) {
                     append(" (canceled early, ran ${actualDurationMinutes}min of ${originalDurationMinutes}min)")
@@ -113,7 +113,7 @@ class ProcessBasal(
                 5 // default for last/only event
             }
             try {
-                basalToNightscoutTreatment(item, durationMinutes)?.let { treatments.add(it) }
+                basalToNightscoutTreatment(item, durationMinutes, config)?.let { treatments.add(it) }
             } catch (e: Exception) {
                 Timber.e(e, "Failed to convert basal seqId=${item.seqId}")
             }
@@ -131,7 +131,7 @@ class ProcessBasal(
         }
     }
 
-    private fun basalToNightscoutTreatment(item: HistoryLogItem, durationMinutes: Int): NightscoutTreatment? {
+    private fun basalToNightscoutTreatment(item: HistoryLogItem, durationMinutes: Int, config: NightscoutSyncConfig): NightscoutTreatment? {
         val parsed = item.parse()
 
         return when (parsed) {
@@ -141,7 +141,7 @@ class ProcessBasal(
                 val automatic = automaticFromSource(source)
                 val reason = suspendReasonFromSource(source)
                 val basalOrigin = basalOriginFromSource(source)
-                val notes = buildString {
+                val notes = config.buildNotes {
                     append("Basal delivery")
                     append(", commanded rate: ${commandedRate}U/hr")
                     if (parsed.profileBasalRate > 0) {
@@ -169,7 +169,7 @@ class ProcessBasal(
                 )
             }
             is BasalRateChangeHistoryLog -> {
-                val notes = buildString {
+                val notes = config.buildNotes {
                     append("Basal rate change (type: ${parsed.changeTypeId})")
                     append(", new rate: ${parsed.commandBasalRate}U/hr")
                     append(", profile rate: ${parsed.baseBasalRate}U/hr")

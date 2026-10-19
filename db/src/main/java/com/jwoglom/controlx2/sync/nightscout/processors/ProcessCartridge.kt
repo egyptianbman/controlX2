@@ -43,7 +43,7 @@ class ProcessCartridge(
         // Convert history logs to Nightscout treatments
         val treatments = logs.mapNotNull { item ->
             try {
-                cartridgeToNightscoutTreatment(item)
+                cartridgeToNightscoutTreatment(item, config)
             } catch (e: Exception) {
                 Timber.e(e, "Failed to convert cartridge change seqId=${item.seqId}")
                 null
@@ -63,7 +63,7 @@ class ProcessCartridge(
         }
     }
 
-    private fun cartridgeToNightscoutTreatment(item: HistoryLogItem): NightscoutTreatment? {
+    private fun cartridgeToNightscoutTreatment(item: HistoryLogItem, config: NightscoutSyncConfig): NightscoutTreatment? {
         val parsed = item.parse()
 
         return when (parsed) {
@@ -72,7 +72,7 @@ class ProcessCartridge(
                     eventType = "Insulin Change",
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
-                    notes = "Cartridge filled with ${parsed.insulinDisplay}U (actual: ${parsed.insulinActual}U)"
+                    notes = config.buildNotes { append("Cartridge filled with ${parsed.insulinDisplay}U (actual: ${parsed.insulinActual}U)") }
                 )
             }
             is TubingFilledHistoryLog -> {
@@ -80,7 +80,7 @@ class ProcessCartridge(
                     eventType = "Site Change",
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
-                    notes = "Tubing filled/primed with ${parsed.primeSize}U"
+                    notes = config.buildNotes { append("Tubing filled/primed with ${parsed.primeSize}U") }
                 )
             }
             is CannulaFilledHistoryLog -> {
@@ -88,7 +88,7 @@ class ProcessCartridge(
                     eventType = "Site Change",
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
-                    notes = "Cannula filled/primed with ${parsed.primeSize}U"
+                    notes = config.buildNotes { append("Cannula filled/primed with ${parsed.primeSize}U") }
                 )
             }
             else -> {

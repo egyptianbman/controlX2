@@ -24,6 +24,9 @@ data class NightscoutSyncConfig(
 
     // Pump model name for Nightscout device identification
     val pumpModelName: String = "Tandem Pump",
+    // Attach human-readable notes to uploaded treatments. Disabled by default to avoid clutter
+    // in Nocturne; enable to mirror NightScout's note behavior.
+    val includeNotes: Boolean = false,
 
     // Phone battery percentage (populated at sync time, not persisted)
     val uploaderBattery: Int? = null
@@ -35,6 +38,7 @@ data class NightscoutSyncConfig(
         private const val PREF_ENABLED_PROCESSORS = "nightscout_enabled_processors"
         private const val PREF_SYNC_INTERVAL = "nightscout_sync_interval"
         private const val PREF_INITIAL_LOOKBACK = "nightscout_initial_lookback_hours"
+        private const val PREF_INCLUDE_NOTES = "nightscout_include_notes"
 
         /**
          * Load configuration from SharedPreferences
@@ -55,7 +59,8 @@ data class NightscoutSyncConfig(
                 apiSecret = prefs.getString(PREF_API_SECRET, "") ?: "",
                 enabledProcessors = enabledProcessors,
                 syncIntervalMinutes = prefs.getInt(PREF_SYNC_INTERVAL, 15),
-                initialLookbackHours = prefs.getInt(PREF_INITIAL_LOOKBACK, 24)
+                initialLookbackHours = prefs.getInt(PREF_INITIAL_LOOKBACK, 24),
+                includeNotes = prefs.getBoolean(PREF_INCLUDE_NOTES, false)
             )
         }
 
@@ -73,6 +78,7 @@ data class NightscoutSyncConfig(
                 )
                 putInt(PREF_SYNC_INTERVAL, config.syncIntervalMinutes)
                 putInt(PREF_INITIAL_LOOKBACK, config.initialLookbackHours)
+                putBoolean(PREF_INCLUDE_NOTES, config.includeNotes)
             }
         }
     }
@@ -90,4 +96,11 @@ data class NightscoutSyncConfig(
     fun getSanitizedUrl(): String {
         return normalizeNightscoutUrl(nightscoutUrl) ?: nightscoutUrl.trimEnd('/')
     }
+    /**
+     * Build the human-readable notes attached to an uploaded treatment, or null when notes are
+     * disabled by config (Nocturne clutter toggle). The [builder] runs only when notes are
+     * enabled, so string construction is skipped for the common disabled case.
+     */
+    fun buildNotes(builder: StringBuilder.() -> Unit): String? =
+        if (includeNotes) buildString(builder) else null
 }

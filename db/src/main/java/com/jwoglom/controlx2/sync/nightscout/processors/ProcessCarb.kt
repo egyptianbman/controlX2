@@ -39,7 +39,7 @@ class ProcessCarb(
 
         val treatments = logs.mapNotNull { item ->
             try {
-                carbToNightscoutTreatment(item)
+                carbToNightscoutTreatment(item, config)
             } catch (e: Exception) {
                 Timber.e(e, "Failed to convert carb entry seqId=${item.seqId}")
                 null
@@ -58,7 +58,7 @@ class ProcessCarb(
         }
     }
 
-    private fun carbToNightscoutTreatment(item: HistoryLogItem): NightscoutTreatment? {
+    private fun carbToNightscoutTreatment(item: HistoryLogItem, config: NightscoutSyncConfig): NightscoutTreatment? {
         val parsed = item.parse()
 
         if (parsed !is CarbEnteredHistoryLog) {
@@ -77,7 +77,7 @@ class ProcessCarb(
             timestamp = item.pumpTimeLocal(),
             seqId = item.seqId,
             carbs = carbs.toDouble(),
-            notes = "Carb entry: ${carbs}g"
+            notes = config.buildNotes { append("Carb entry: ${carbs}g") }
         )
     }
 }

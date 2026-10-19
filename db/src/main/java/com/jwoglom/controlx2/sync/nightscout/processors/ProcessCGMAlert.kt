@@ -49,7 +49,7 @@ class ProcessCGMAlert(
         // Convert history logs to Nightscout treatments
         val treatments = logs.mapNotNull { item ->
             try {
-                cgmAlertToNightscoutTreatment(item)
+                cgmAlertToNightscoutTreatment(item, config)
             } catch (e: Exception) {
                 Timber.e(e, "Failed to convert CGM alert seqId=${item.seqId}")
                 null
@@ -69,7 +69,7 @@ class ProcessCGMAlert(
         }
     }
 
-    private fun cgmAlertToNightscoutTreatment(item: HistoryLogItem): NightscoutTreatment? {
+    private fun cgmAlertToNightscoutTreatment(item: HistoryLogItem, config: NightscoutSyncConfig): NightscoutTreatment? {
         val parsed = item.parse()
 
         return when (parsed) {
@@ -86,7 +86,7 @@ class ProcessCGMAlert(
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
                     reason = reason,
-                    notes = "CGM alert activated, ID: ${parsed.alertId}"
+                    notes = config.buildNotes { append("CGM alert activated, ID: ${parsed.alertId}") }
                 )
             }
             is CgmAlertClearedHistoryLog -> {
@@ -102,7 +102,7 @@ class ProcessCGMAlert(
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
                     reason = reason,
-                    notes = "CGM alert cleared, ID: ${parsed.alertId}"
+                    notes = config.buildNotes { append("CGM alert cleared, ID: ${parsed.alertId}") }
                 )
             }
             is CgmAlertActivatedDexHistoryLog -> {
@@ -118,7 +118,7 @@ class ProcessCGMAlert(
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
                     reason = reason,
-                    notes = "Dexcom alert activated, ID: ${parsed.alertId}"
+                    notes = config.buildNotes { append("Dexcom alert activated, ID: ${parsed.alertId}") }
                 )
             }
             is CgmAlertClearedDexHistoryLog -> {
@@ -134,7 +134,7 @@ class ProcessCGMAlert(
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
                     reason = reason,
-                    notes = "Dexcom alert cleared, ID: ${parsed.alertId}"
+                    notes = config.buildNotes { append("Dexcom alert cleared, ID: ${parsed.alertId}") }
                 )
             }
             is CgmAlertActivatedFsl2HistoryLog -> {
@@ -150,7 +150,7 @@ class ProcessCGMAlert(
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
                     reason = reason,
-                    notes = "FreeStyle Libre alert activated, ID: ${parsed.alertId}"
+                    notes = config.buildNotes { append("FreeStyle Libre alert activated, ID: ${parsed.alertId}") }
                 )
             }
             is CgmAlertClearedFsl2HistoryLog -> {
@@ -166,7 +166,7 @@ class ProcessCGMAlert(
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
                     reason = reason,
-                    notes = "FreeStyle Libre alert cleared, ID: ${parsed.alertId}"
+                    notes = config.buildNotes { append("FreeStyle Libre alert cleared, ID: ${parsed.alertId}") }
                 )
             }
             else -> {

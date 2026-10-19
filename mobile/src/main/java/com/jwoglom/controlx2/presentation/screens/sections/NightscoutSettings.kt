@@ -134,6 +134,29 @@ fun NightscoutSettings(
                 )
                 Divider()
             }
+            item {
+                ListItem(
+                    headlineContent = { Text("Include notes in uploads") },
+                    supportingContent = {
+                        Text(
+                            "Attach human-readable notes (rate, source, IDs) to each uploaded " +
+                            "event. Off by default to reduce clutter in Nocturne; enable to mirror NightScout."
+                        )
+                    },
+                    trailingContent = {
+                        Checkbox(
+                            checked = config.includeNotes,
+                            onCheckedChange = null
+                        )
+                    },
+                    modifier = Modifier.clickable {
+                        val newConfig = config.copy(includeNotes = !config.includeNotes)
+                        config = newConfig
+                        NightscoutSyncConfig.save(prefs, newConfig)
+                    }
+                )
+                Divider()
+            }
 
             item {
                 ListItem(

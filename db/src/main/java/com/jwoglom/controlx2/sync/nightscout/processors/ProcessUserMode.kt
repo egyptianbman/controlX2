@@ -39,7 +39,7 @@ class ProcessUserMode(
         // Convert history logs to Nightscout treatments
         val treatments = logs.mapNotNull { item ->
             try {
-                modeChangeToNightscoutTreatment(item)
+                modeChangeToNightscoutTreatment(item, config)
             } catch (e: Exception) {
                 Timber.e(e, "Failed to convert mode change seqId=${item.seqId}")
                 null
@@ -59,7 +59,7 @@ class ProcessUserMode(
         }
     }
 
-    private fun modeChangeToNightscoutTreatment(item: HistoryLogItem): NightscoutTreatment? {
+    private fun modeChangeToNightscoutTreatment(item: HistoryLogItem, config: NightscoutSyncConfig): NightscoutTreatment? {
         val parsed = item.parse()
 
         return when (parsed) {
@@ -86,7 +86,7 @@ class ProcessUserMode(
                     seqId = item.seqId,
                     duration = null,
                     reason = "Control-IQ mode changed to $modeName",
-                    notes = "Control-IQ mode changed from $previousModeName to $modeName"
+                    notes = config.buildNotes { append("Control-IQ mode changed from $previousModeName to $modeName") }
                 )
             }
             else -> {

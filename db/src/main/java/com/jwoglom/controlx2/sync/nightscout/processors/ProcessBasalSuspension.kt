@@ -41,7 +41,7 @@ class ProcessBasalSuspension(
         // Convert history logs to Nightscout treatments
         val treatments = logs.mapNotNull { item ->
             try {
-                suspensionToNightscoutTreatment(item)
+                suspensionToNightscoutTreatment(item, config)
             } catch (e: Exception) {
                 Timber.e(e, "Failed to convert basal suspension seqId=${item.seqId}")
                 null
@@ -61,7 +61,7 @@ class ProcessBasalSuspension(
         }
     }
 
-    private fun suspensionToNightscoutTreatment(item: HistoryLogItem): NightscoutTreatment? {
+    private fun suspensionToNightscoutTreatment(item: HistoryLogItem, config: NightscoutSyncConfig): NightscoutTreatment? {
         val parsed = item.parse()
 
         return when (parsed) {
@@ -75,7 +75,7 @@ class ProcessBasalSuspension(
                     absolute = 0.0,
                     duration = null,
                     reason = "Pumping suspended (reason: ${parsed.reasonId})",
-                    notes = "Pumping suspended, IOB: ${insulinAmount}U, reason code: ${parsed.reasonId}"
+                    notes = config.buildNotes { append("Pumping suspended, IOB: ${insulinAmount}U, reason code: ${parsed.reasonId}") }
                 )
             }
             is HypoMinimizerSuspendHistoryLog -> {
@@ -87,7 +87,7 @@ class ProcessBasalSuspension(
                     absolute = 0.0,
                     duration = null,
                     reason = "Hypo Minimizer suspend",
-                    notes = "Hypo Minimizer suspend"
+                    notes = config.buildNotes { append("Hypo Minimizer suspend") }
                 )
             }
             else -> {

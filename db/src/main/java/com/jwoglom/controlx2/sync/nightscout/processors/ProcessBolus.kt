@@ -70,7 +70,7 @@ class ProcessBolus(
 
         val treatments = logs.mapNotNull { item ->
             try {
-                bolusToNightscoutTreatment(item)
+                bolusToNightscoutTreatment(item, config)
             } catch (e: Exception) {
                 Timber.e(e, "Failed to convert bolus seqId=${item.seqId}")
                 null
@@ -89,7 +89,7 @@ class ProcessBolus(
         }
     }
 
-    private fun bolusToNightscoutTreatment(item: HistoryLogItem): NightscoutTreatment? {
+    private fun bolusToNightscoutTreatment(item: HistoryLogItem, config: NightscoutSyncConfig): NightscoutTreatment? {
         val parsed = item.parse()
 
         if (parsed !is BolusDeliveryHistoryLog) {
@@ -105,7 +105,7 @@ class ProcessBolus(
         val isExtended = extendedInsulin > 0 && extendedDurationMinutes > 0
 
         return if (isExtended) {
-            buildComboBolus(item, parsed, immediateInsulin, extendedInsulin, extendedDurationMinutes)
+            buildComboBolus(item, parsed, immediateInsulin, extendedInsulin, extendedDurationMinutes, config)
         } else {
             // A standard bolus history-log record is emitted twice: a STARTED marker (status=1,
             // deliveredTotal=0) before delivery and a COMPLETED record (status=0, deliveredTotal>0)
@@ -116,16 +116,17 @@ class ProcessBolus(
                 return null
             }
 
-            buildStandardBolus(item, parsed, totalInsulin)
+            buildStandardBolus(item, parsed, totalInsulin, config)
         }
     }
 
     private fun buildStandardBolus(
         item: HistoryLogItem,
         bolus: BolusDeliveryHistoryLog,
-        totalInsulin: Double
+        totalInsulin: Double,
+        config: NightscoutSyncConfig
     ): NightscoutTreatment {
-        val notes = buildBolusNotes(bolus)
+        val notes = config.buildNotes { append(buildBolusNotes(bolus)) }
 
         return NightscoutTreatment.fromTimestamp(
             eventType = "Bolus",
@@ -141,7 +142,8 @@ class ProcessBolus(
         bolus: BolusDeliveryHistoryLog,
         immediateInsulin: Double,
         extendedInsulin: Double,
-        extendedDurationMinutes: Int
+        extendedDurationMinutes: Int,
+        config: NightscoutSyncConfig
     ): NightscoutTreatment {
         // Per Nightscout/Nocturne spec:
         // insulin = total programmed units (immediate + extended); Nocturne renders this as the bolus dose
@@ -163,7 +165,7 @@ class ProcessBolus(
             extendedInsulin / extendedDurationMinutes * 60
         } else 0.0
 
-        val notes = buildString {
+        val notes = config.buildNotes {
             append(buildBolusNotes(bolus))
             append(", combo: ${immediateInsulin}U now + ${extendedInsulin}U over ${extendedDurationMinutes}min")
         }
