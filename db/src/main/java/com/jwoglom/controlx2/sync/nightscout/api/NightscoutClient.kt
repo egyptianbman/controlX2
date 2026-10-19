@@ -34,6 +34,11 @@ class NightscoutClient(
     private val gson = Gson()
     private val apiSecretHash: String by lazy { hashNightscoutApiSecret(apiSecret) }
     private val announcementParser = NightscoutAnnouncementParser(gson)
+    private companion object {
+        // Batch Nightscout treatment uploads. A single oversized POST can exceed Nightscout's
+        // response window and trip the 30s read timeout (2283 basal treatments timed out 2026-10-19).
+        const val TREATMENT_UPLOAD_CHUNK_SIZE = 250
+    }
 
     override suspend fun uploadEntries(entries: List<NightscoutEntry>): Result<Int> {
         return withContext(Dispatchers.IO) {
@@ -51,7 +56,12 @@ class NightscoutClient(
     override suspend fun uploadTreatments(treatments: List<NightscoutTreatment>): Result<Int> {
         return withContext(Dispatchers.IO) {
             try {
-                post("/api/v1/treatments", treatments)
+                // Chunk large batches: a single oversized POST can exceed Nightscout's
+                // response window and trip the 30s read timeout (2283 basal treatments timed
+                // out 2026-10-19). Smaller batches stay well under the response window.
+                for (chunk in treatments.chunked(TREATMENT_UPLOAD_CHUNK_SIZE)) {
+                    post("/api/v1/treatments", chunk)
+                }
                 Timber.d("Uploaded ${treatments.size} treatments to Nightscout")
                 Result.success(treatments.size)
             } catch (e: Exception) {
