@@ -2,6 +2,10 @@
 
 package com.jwoglom.controlx2.presentation.screens.sections
 
+import android.content.Context
+import android.content.SharedPreferences
+import android.os.Handler
+import android.os.Looper
 import android.widget.Toast
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -47,6 +51,15 @@ import com.jwoglom.controlx2.sync.nightscout.ProcessorType
 import com.jwoglom.controlx2.sync.nightscout.NightscoutSyncWorker
 import com.jwoglom.controlx2.sync.nightscout.normalizeNightscoutUrl
 import com.jwoglom.controlx2.presentation.components.HeaderLine
+import com.jwoglom.controlx2.dataStore
+import com.jwoglom.controlx2.db.historylog.HistoryLogDatabase
+import com.jwoglom.controlx2.presentation.components.HistoryLogSyncProgressBar
+import com.jwoglom.controlx2.util.HistoryLogAnchorLookup
+import com.jwoglom.controlx2.util.HistoryLogAnchorManager
+import com.jwoglom.controlx2.util.HistoryLogSyncProgress
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.withContext
 import kotlinx.coroutines.launch
 import java.time.Instant
 import java.time.ZoneId
@@ -67,7 +80,6 @@ fun NightscoutSettings(
     var showUrlDialog by remember { mutableStateOf(false) }
     var showApiSecretDialog by remember { mutableStateOf(false) }
     var showProcessorsDialog by remember { mutableStateOf(false) }
-    var showLookbackDialog by remember { mutableStateOf(false) }
     var showIntervalDialog by remember { mutableStateOf(false) }
 
     LazyColumn(
@@ -220,13 +232,22 @@ fun NightscoutSettings(
                 Divider()
             }
 
-            // Lookback Period
+            // NightScout sync progress
+            item {
+                HistoryLogSyncProgressBar(title = "NightScout Sync")
+            }
+
+            // Send Range to NightScout
             item {
                 ListItem(
-                    headlineContent = { Text("Initial Lookback") },
-                    supportingContent = { Text("${config.initialLookbackHours} hours on first sync") },
+                    headlineContent = { Text("Send Range to NightScout") },
+                    supportingContent = {
+                        Text("Send a downloaded date range to NightScout (re-sync older data)")
+                    },
                     modifier = Modifier.clickable {
-                        showLookbackDialog = true
+                        coroutineScope.launch {
+                            openNightscoutRangeDialog(context, prefs, pumpSid)
+                        }
                     }
                 )
                 Divider()
@@ -440,42 +461,6 @@ fun NightscoutSettings(
         )
     }
 
-    // Lookback Dialog
-    if (showLookbackDialog) {
-        var lookbackInput by remember { mutableStateOf(config.initialLookbackHours.toString()) }
-        AlertDialog(
-            onDismissRequest = { showLookbackDialog = false },
-            title = { Text("Initial Lookback Period") },
-            text = {
-                Column {
-                    Text("How far back to sync when first enabled (hours)")
-                    OutlinedTextField(
-                        value = lookbackInput,
-                        onValueChange = { lookbackInput = it },
-                        label = { Text("Hours") },
-                        keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
-                        modifier = Modifier.fillMaxWidth()
-                    )
-                }
-            },
-            confirmButton = {
-                TextButton(onClick = {
-                    val hours = lookbackInput.toIntOrNull() ?: 24
-                    val newConfig = config.copy(initialLookbackHours = hours.coerceIn(1, 720))
-                    config = newConfig
-                    NightscoutSyncConfig.save(prefs, newConfig)
-                    showLookbackDialog = false
-                }) {
-                    Text("Save")
-                }
-            },
-            dismissButton = {
-                TextButton(onClick = { showLookbackDialog = false }) {
-                    Text("Cancel")
-                }
-            }
-        )
-    }
 }
 
 private fun formatTimestamp(timestampMillis: Long): String {
@@ -484,3 +469,82 @@ private fun formatTimestamp(timestampMillis: Long): String {
         .atZone(ZoneId.systemDefault())
         .format(formatter)
 }
+
+/**
+ * Open the shared range dialog for re-sending a downloaded date range to NightScout.
+ *
+ * Fetches the DB's actual seq span and the sampled anchors off the main thread, then hands the
+ * window to [rangeSliderRangeDialog]. On confirm it maps the chosen ids back to instants via the
+ * anchor lookup and hands them to [NightscoutSyncWorker.syncRetroactiveRange], which runs the sync
+ * on a background scope, drives the shared progress field per-processor, and toasts start/finish.
+ */
+suspend fun openNightscoutRangeDialog(
+    context: Context,
+    prefs: SharedPreferences,
+    pumpSid: Int,
+) {
+    val anchorManager = HistoryLogAnchorManager(context)
+
+    // Bounds + anchors are DB reads; keep them off the main thread.
+    val (firstSeq, lastSeq, lookup) = withContext(Dispatchers.IO) {
+        val range = HistoryLogDatabase.getDatabase(context)
+            .historyLogDao()
+            .getSeqRange(pumpSid)
+            .first()
+        val min = range?.minSeqId ?: 0L
+        val max = range?.maxSeqId ?: 0L
+        Triple(min, max, HistoryLogAnchorLookup(anchorManager.anchors(pumpSid)))
+    }
+    if (firstSeq <= 0L || lastSeq < firstSeq) {
+        Toast.makeText(
+            context,
+            "No history in this app yet — fetch logs first",
+            Toast.LENGTH_SHORT
+        ).show()
+        return
+    }
+
+    rangeSliderRangeDialog(
+        context,
+        "Send Range to NightScout",
+        "Only data already downloaded to this app is sent. Use Get History Logs first to pull more.",
+        firstSeq,
+        lastSeq,
+        dateLabel = { id -> formatAnchor(id, lookup) },
+        detail = { start, end -> "${end - start + 1} items in app" },
+        confirmText = "Send to NightScout"
+    ) { startId, endId ->
+        val startLdt = lookup.dateForId(startId)
+        val endLdt = lookup.dateForId(endId)
+        if (startLdt == null || endLdt == null) {
+            Toast.makeText(
+                context,
+                "Date not found for the selected range",
+                Toast.LENGTH_SHORT
+            ).show()
+            return@rangeSliderRangeDialog
+        }
+
+        // Prime the bar, then let the worker drive it per-processor and toast completion.
+        dataStore.historyLogSyncProgress.value = HistoryLogSyncProgress(1, 0)
+        NightscoutSyncWorker.getInstance(context, prefs, pumpSid)
+            .syncRetroactiveRange(startLdt, endLdt) { done, total ->
+                val progress = HistoryLogSyncProgress(total.toLong(), done.toLong())
+                if (Looper.myLooper() != Looper.getMainLooper()) {
+                    Handler(Looper.getMainLooper()).post {
+                        dataStore.historyLogSyncProgress.value = progress
+                    }
+                } else {
+                    dataStore.historyLogSyncProgress.value = progress
+                }
+            }
+    }
+}
+
+/** Render a seq id as "id · MMM dd, yyyy HH:mm", falling back to the bare id with no anchor. */
+private fun formatAnchor(id: Long, lookup: HistoryLogAnchorLookup): String {
+    val date = lookup.dateForId(id)
+    return if (date != null) "$id  \u00b7  ${date.format(ANCHOR_DATE_FORMAT)}" else id.toString()
+}
+
+private val ANCHOR_DATE_FORMAT = DateTimeFormatter.ofPattern("MMM dd, yyyy HH:mm")

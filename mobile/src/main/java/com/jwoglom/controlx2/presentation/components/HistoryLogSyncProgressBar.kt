@@ -33,7 +33,8 @@ import com.jwoglom.controlx2.util.HistoryLogSyncProgress
 fun HistoryLogSyncProgressBar(
     modifier: Modifier = Modifier,
     hideWhenComplete: Boolean = false,
-    replaceWithPaddingWhenComplete: Boolean = false
+    replaceWithPaddingWhenComplete: Boolean = false,
+    title: String = "History Log Sync"
 ) {
     val ds = LocalDataStore.current
     val historyLogProgress by ds.historyLogSyncProgress.observeAsState()
@@ -72,7 +73,7 @@ fun HistoryLogSyncProgressBar(
                 modifier = Modifier.fillMaxWidth()
             ) {
                 Text(
-                    text = "History Log Sync",
+                    text = title,
                     style = MaterialTheme.typography.bodyMedium,
                     fontWeight = FontWeight.SemiBold,
                     fontSize = 14.sp

@@ -18,6 +18,8 @@ import java.io.BufferedReader
 import java.io.InputStreamReader
 import java.net.HttpURLConnection
 import java.net.URL
+import android.widget.Toast
+import java.time.LocalDateTime
 
 /**
  * Worker for periodic Nightscout sync
@@ -75,7 +77,7 @@ class NightscoutSyncWorker(
     fun syncNow() {
         Timber.i("Triggering immediate Nightscout sync")
         scope.launch {
-            performSync()
+            withCoordinator { it.syncAll() }
         }
     }
 
@@ -132,7 +134,7 @@ class NightscoutSyncWorker(
 
         val runnable = Runnable {
             scope.launch {
-                performSync()
+                withCoordinator { it.syncAll() }
                 scheduleNextSync(intervalMinutes)
             }
         }
@@ -142,28 +144,32 @@ class NightscoutSyncWorker(
     }
 
     /**
-     * Perform a sync operation
+     * Validate config, verify connectivity, build a coordinator, run [action], and record
+     * success/failure. Returns true only when [action] produced a SyncResult.Success.
+     * Shared by the periodic and retroactive paths so validation and error handling live once.
      */
-    private suspend fun performSync() {
+    private suspend fun withCoordinator(
+        action: suspend (NightscoutSyncCoordinator) -> SyncResult
+    ): Boolean {
         try {
             val config = NightscoutSyncConfig.load(prefs)
 
             if (!config.enabled) {
                 Timber.d("Nightscout sync is disabled, skipping")
-                return
+                return false
             }
 
             if (!config.isValid()) {
                 Timber.e("Nightscout configuration is invalid, skipping sync")
                 NightscoutSyncStatusStore.recordFailure(prefs, "Nightscout configuration is invalid")
-                return
+                return false
             }
 
             val normalizedUrl = normalizeNightscoutUrl(config.nightscoutUrl)
             if (normalizedUrl == null) {
                 Timber.e("Nightscout URL is invalid, skipping sync")
                 NightscoutSyncStatusStore.recordFailure(prefs, "Nightscout URL is invalid")
-                return
+                return false
             }
 
             val connectivityCheck = checkNightscoutConnection(normalizedUrl, config.apiSecret)
@@ -171,7 +177,7 @@ class NightscoutSyncWorker(
                 val message = connectivityCheck.exceptionOrNull()?.message ?: "Connection test failed"
                 Timber.e("Nightscout connection check failed: $message")
                 NightscoutSyncStatusStore.recordFailure(prefs, "Connection failed: $message")
-                return
+                return false
             }
 
             // Create coordinator with dependencies
@@ -205,7 +211,7 @@ class NightscoutSyncWorker(
             )
 
             // Perform sync
-            when (val result = coordinator.syncAll()) {
+            return when (val result = action(coordinator)) {
                 is SyncResult.Success -> {
                     NightscoutSyncStatusStore.recordSuccess(prefs)
                     Timber.i(
@@ -214,17 +220,21 @@ class NightscoutSyncWorker(
                         "uploaded ${result.uploadedCount}, " +
                         "seqId ${result.seqIdRange.first}..${result.seqIdRange.second}"
                     )
+                    true
                 }
                 is SyncResult.NoData -> {
                     NightscoutSyncStatusStore.recordSuccess(prefs)
                     Timber.d("No new data to sync")
+                    false
                 }
                 is SyncResult.Disabled -> {
                     Timber.d("Nightscout sync is disabled")
+                    false
                 }
                 is SyncResult.InvalidConfig -> {
                     NightscoutSyncStatusStore.recordFailure(prefs, "Nightscout configuration is invalid")
                     Timber.e("Nightscout configuration is invalid")
+                    false
                 }
             }
         } catch (e: Exception) {
@@ -233,6 +243,35 @@ class NightscoutSyncWorker(
                 e.message ?: "Unexpected Nightscout sync error"
             )
             Timber.e(e, "Error during Nightscout sync")
+            return false
+        }
+    }
+
+    /**
+     * Retroactively sync the range [startLdt]..[endLdt]; the coordinator maps it to a seqId range.
+     * Fires [onProgress] (done, total) per processor on the IO thread for UI progress bars;
+     * toasts report start and completion/error on the main thread.
+     */
+    fun syncRetroactiveRange(
+        startLdt: LocalDateTime,
+        endLdt: LocalDateTime,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }
+    ) {
+        Timber.i("Triggering retroactive Nightscout sync: $startLdt to $endLdt")
+        toast("Syncing data to NightScout\u2026")
+        scope.launch {
+            if (withCoordinator { it.syncRetroactive(startLdt, endLdt, onProgress) }) {
+                toast("Uploaded to NightScout")
+            } else {
+                toast("Couldn't send to NightScout")
+            }
+        }
+    }
+
+    /** Show a toast on the main thread (this worker runs on an IO coroutine). */
+    private fun toast(message: String) {
+        handler.post {
+            Toast.makeText(context, message, Toast.LENGTH_LONG).show()
         }
     }
 

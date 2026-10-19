@@ -59,7 +59,7 @@ class NightscoutSyncCoordinator(
     /**
      * Sync all enabled processors
      */
-    suspend fun syncAll(): SyncResult {
+    suspend fun syncAll(onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }): SyncResult {
         // Reset one-shot timestamp sample logging for this sync run.
         NightscoutTimestampPolicy.resetSampleLoggingForSyncRun()
         if (!config.enabled) {
@@ -99,14 +99,26 @@ class NightscoutSyncCoordinator(
             Timber.d("No history logs found in range $startSeqId..$endSeqId")
             return SyncResult.NoData
         }
+        // Retroactive re-send: the selected range is a re-upload, not a resume. The per-processor
+        // cursors are already past this range, so reset every processor cursor (and the global
+        // fallback) below the range start to force re-processing and re-uploading of the range.
+        if (syncState.retroactiveStartTime != null && syncState.retroactiveEndTime != null) {
+            resetCursorsForRetroactive(startSeqId)
+        }
 
         Timber.i("Syncing ${allLogs.size} history logs (seqId $startSeqId..$endSeqId)")
 
         var totalUploaded = 0
         val latestSeqId = allLogs.maxOf { it.seqId }
 
+        // Signal the start of processing so the progress bar begins at 0 of total.
+        onProgress?.invoke(0, processorOrder.size)
+
         // SEQUENTIAL processing (not parallel!) with per-processor cursors
-        for (processorType in processorOrder) {
+        for ((index, processorType) in processorOrder.withIndex()) {
+            // Report progress at the start of each processor so skipped (disabled/empty) ones
+            // still advance the bar; the final iteration reports total, filling the indicator.
+            onProgress?.invoke(index + 1, processorOrder.size)
             val processor = processorMap[processorType] ?: continue
 
             if (!processor.isEnabled(config)) {
@@ -212,10 +224,14 @@ class NightscoutSyncCoordinator(
     /**
      * Perform retroactive sync for a specific time range
      */
-    suspend fun syncRetroactive(startTime: LocalDateTime, endTime: LocalDateTime): SyncResult {
+    suspend fun syncRetroactive(
+        startTime: LocalDateTime,
+        endTime: LocalDateTime,
+        onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }
+    ): SyncResult {
         Timber.i("Starting retroactive sync: $startTime to $endTime")
         syncStateDao.setRetroactiveRange(startTime, endTime)
-        return syncAll()
+        return syncAll(onProgress)
     }
 
     /**
@@ -266,6 +282,25 @@ class NightscoutSyncCoordinator(
 
         Timber.d("Retroactive sync range: seqId $startSeqId..$endSeqId for time $startTime..$endTime")
         return startSeqId to endSeqId
+    }
+    /**
+     * Reset every per-processor cursor (and the global fallback) to below [belowSeqId] so a
+     * retroactive re-send re-processes and re-uploads the selected range instead of skipping data
+     * the cursors already marked done. maxProcessedBolusId is cleared so combo/dual boluses in the
+     * range resend their start entry.
+     */
+    private suspend fun resetCursorsForRetroactive(belowSeqId: Long) {
+        for (state in processorStateDao.getAll()) {
+            processorStateDao.upsert(
+                NightscoutProcessorState(
+                    processorType = state.processorType,
+                    lastProcessedSeqId = belowSeqId,
+                    lastSuccessTime = null,
+                    maxProcessedBolusId = 0
+                )
+            )
+        }
+        syncStateDao.updateLastProcessed(belowSeqId, LocalDateTime.now())
     }
 }
 

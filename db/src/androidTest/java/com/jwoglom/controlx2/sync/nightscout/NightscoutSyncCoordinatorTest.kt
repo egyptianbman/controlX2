@@ -229,14 +229,22 @@ class NightscoutSyncCoordinatorTest {
         )
 
         // Retroactive sync for specific range
+        val progress = mutableListOf<Pair<Int, Int>>()
         val result = coordinator.syncRetroactive(
             now.minusDays(10),
             now.minusDays(8)
-        )
+        ) { done, total -> progress.add(done to total) }
 
         assertTrue(result is SyncResult.Success)
         val success = result as SyncResult.Success
         assertEquals(3, success.processedCount) // 3 logs in range
+
+        // Progress runs from 0 through the processor pipeline and finishes at done == total.
+        assertTrue(progress.isNotEmpty())
+        assertEquals(0, progress.first().first)
+        val lastProgress = progress.last()
+        assertEquals(lastProgress.first, lastProgress.second)
+        assertTrue(progress.all { it.first <= it.second })
 
         // Verify retroactive range was cleared
         val state = syncStateDb.nightscoutSyncStateDao().getState()

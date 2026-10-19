@@ -86,7 +86,6 @@ import androidx.compose.ui.unit.toSize
 import androidx.compose.ui.window.Popup
 import androidx.core.app.ShareCompat
 import androidx.navigation.NavHostController
-import com.google.android.material.slider.RangeSlider
 import com.google.common.base.Splitter
 import com.jwoglom.pumpx2.pump.messages.Message
 import com.jwoglom.pumpx2.pump.messages.annotations.HistoryLogProps
@@ -1190,50 +1189,16 @@ suspend fun triggerHistoryLogRequestDialog(
     val first = status.firstSequenceNum
     val head = status.lastSequenceNum
 
-    val builder = AlertDialog.Builder(context)
-    builder.setTitle("Get history logs")
-
-    val layout = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
-
-    // Range slider: two native handles pick the start (oldest) and end (head) IDs. RangeSlider
-    // keeps the thumbs ordered, so start never runs past end.
-    layout.addView(divider(context))
-    layout.addView(instructions(context, "Drag the two handles to select the range of history to fetch."))
-    val rangeSlider = RangeSlider(context).apply {
-        valueFrom = first.toFloat()
-        valueTo = head.toFloat()
-        values = mutableListOf(first.toFloat(), head.toFloat())
-        stepSize = 1.0f
-    }
-    layout.addView(rangeSlider)
-
-    // Info table: start/end/head/requests, kept current as either slider moves.
-    val startRow = infoRow(context, "Start", formatAnchor(first, lookup))
-    val endRow = infoRow(context, "End", formatAnchor(head, lookup))
-    val headRow = infoRow(context, "Head", formatAnchor(head, lookup))
-    val reqRow = infoRow(context, "Requests", "~${requestCount(first, head)}")
-    layout.addView(startRow.first)
-    layout.addView(endRow.first)
-    layout.addView(headRow.first)
-    layout.addView(reqRow.first)
-
-    // Live updates: keep id/date labels and the request count current. RangeSlider keeps the thumbs
-    // ordered, so start never runs past end without manual clamping.
-    fun refresh() {
-        val vs = rangeSlider.values
-        val s = vs[0].toLong()
-        val e = vs[1].toLong()
-        startRow.second.text = formatAnchor(s, lookup)
-        endRow.second.text = formatAnchor(e, lookup)
-        reqRow.second.text = "~${requestCount(s, e)}"
-    }
-    rangeSlider.addOnChangeListener { _, _, _ -> refresh() }
-
-    builder.setView(layout)
-    builder.setPositiveButton("Fetch") { _, _ ->
-        val vs = rangeSlider.values
-        val startId = vs[0].toLong()
-        val endId = vs[1].toLong()
+    rangeSliderRangeDialog(
+        context,
+        "Get history logs",
+        "Drag the two handles to select the range of history to fetch.",
+        first,
+        head,
+        dateLabel = { id -> formatAnchor(id, lookup) },
+        detail = { startId, endId -> "~${requestCount(startId, endId)} request(s)" },
+        confirmText = "Fetch"
+    ) { startId, endId ->
         // Fetch the full span from start to end. triggerHistoryLogRange walks it end-to-start, so
         // every HistoryLogRequest stays within the pump's history; no head cap, the user can pull
         // the entire fetched range.
@@ -1258,8 +1223,6 @@ suspend fun triggerHistoryLogRequestDialog(
             )
         }
     }
-    builder.setNegativeButton("Cancel") { dialog, which -> dialog.cancel() }
-    builder.show()
 }
 
 private fun formatAnchor(id: Long, lookup: HistoryLogAnchorLookup): String {
@@ -1275,56 +1238,12 @@ private fun requestCount(startId: Long, endId: Long): Long {
     return if (span <= 0) 0 else (span + MaxHistoryLogRequestCount - 1) / MaxHistoryLogRequestCount
 }
 
-/** Two-column info row: a bold label and a value that fills the remaining width. */
-private fun infoRow(context: Context, label: String, value: String): Pair<View, TextView> {
-    val row = LinearLayout(context).apply { orientation = LinearLayout.HORIZONTAL }
-    val labelView = TextView(context).apply {
-        this.text = label
-        setTypeface(null, Typeface.BOLD)
-        setPadding(0, 0, context.dp(16), 0)
-    }
-    val valueView = TextView(context).apply {
-        this.text = value
-        layoutParams = LinearLayout.LayoutParams(
-            0,
-            LinearLayout.LayoutParams.WRAP_CONTENT,
-            1f
-        )
-    }
-    row.addView(labelView)
-    row.addView(valueView)
-    return Pair(row, valueView)
-}
-
-private fun Context.dp(value: Int): Int =
-    (value * resources.displayMetrics.density).toInt()
-
 private fun sectionHeading(context: Context, text: String): TextView {
     return TextView(context).apply {
         this.text = text
         setTypeface(null, Typeface.BOLD)
         setPadding(0, 4, 0, 12)
     }
-}
-private fun instructions(context: Context, text: String): TextView =
-    TextView(context).apply {
-        this.text = text
-        setTypeface(null, Typeface.NORMAL)
-        // Muted gray so it reads as guidance, not a field label.
-        setTextColor(0xFF9E9E9E.toInt())
-    }
-
-private fun divider(context: Context): View {
-    val h = (2 * context.resources.displayMetrics.density).toInt()
-    val v = View(context)
-    v.layoutParams = LinearLayout.LayoutParams(
-        LinearLayout.LayoutParams.MATCH_PARENT, h
-    ).apply {
-        topMargin = (10 * context.resources.displayMetrics.density).toInt()
-        bottomMargin = (10 * context.resources.displayMetrics.density).toInt()
-    }
-    v.setBackgroundColor(0xFFE0E0E0.toInt())
-    return v
 }
 
 suspend fun triggerHistoryLogRange(
