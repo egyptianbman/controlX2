@@ -131,6 +131,7 @@ import com.jwoglom.controlx2.LocalDataStore
 import com.jwoglom.controlx2.Prefs
 import com.jwoglom.controlx2.dataStore
 import com.jwoglom.controlx2.util.HistoryLogSyncProgress
+import com.jwoglom.controlx2.util.MaxHistoryLogRequestCount
 import com.jwoglom.controlx2.db.historylog.HistoryLogDatabase
 import com.jwoglom.controlx2.db.historylog.HistoryLogRepo
 import com.jwoglom.controlx2.db.historylog.HistoryLogDao
@@ -1268,10 +1269,10 @@ private fun formatAnchor(id: Long, lookup: HistoryLogAnchorLookup): String {
 
 private val ANCHOR_DATE_FORMAT = DateTimeFormatter.ofPattern("MMM dd, yyyy HH:mm")
 
-/** Request batches of 256 IDs, matching triggerHistoryLogRange's chunk size (ceil over the span). */
+/** Estimate request batches of MaxHistoryLogRequestCount IDs, matching triggerHistoryLogRange's chunk size (ceil over the span). */
 private fun requestCount(startId: Long, endId: Long): Long {
     val span = endId - startId + 1
-    return if (span <= 0) 0 else (span + 255) / 256
+    return if (span <= 0) 0 else (span + MaxHistoryLogRequestCount - 1) / MaxHistoryLogRequestCount
 }
 
 /** Two-column info row: a bold label and a value that fills the remaining width. */
@@ -1333,7 +1334,7 @@ suspend fun triggerHistoryLogRange(
     endLog: Long,
     pumpSid: Int,
     progressCallback: ((target: Long, synced: Long) -> Unit)? = null,
-    chunkSize: Int = 256,
+    chunkSize: Int = MaxHistoryLogRequestCount,
     requestDelayMs: Long = 500,
     pollIntervalMs: Long = 500,
     groupTimeoutMs: Long = 8000,

@@ -32,6 +32,14 @@ data class HistoryLogSyncProgress(val target: Long, val synced: Long)
 const val InitialHistoryLogCount = 5000
 const val FetchGroupTimeoutMs = 4000
 
+/**
+ * Max records per HistoryLogRequest. numberOfLogs is a single signed byte on the wire: buildCargo
+ * stores (byte) count and parse reads it via baload (sign-extended). 256 wraps to 0 and 128-255 read
+ * as negative, so the pump returns 0 records for any count above 127. The manual fetcher caps its
+ * chunkSize at this ceiling; the auto-fetch already uses 32.
+ */
+const val MaxHistoryLogRequestCount = 127
+
 class HistoryLogFetcher(
     private val historyLogRepo: HistoryLogRepo,
     val pumpSid: Int,
