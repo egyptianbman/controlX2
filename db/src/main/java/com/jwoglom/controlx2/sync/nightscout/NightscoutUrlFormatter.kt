@@ -5,7 +5,7 @@ import java.net.URI
 fun normalizeNightscoutUrl(rawUrl: String): String? {
     val trimmed = rawUrl.trim()
     if (trimmed.isBlank()) {
-        return ""
+        return null
     }
 
     val withScheme = if (trimmed.contains("://")) {

@@ -66,13 +66,11 @@ class ProcessBasalResume(
 
         return when (parsed) {
             is PumpingResumedHistoryLog -> {
-                val insulinAmount = parsed.insulinAmount / 1000.0
                 NightscoutTreatment.fromTimestamp(
-                    eventType = "Note",
+                    eventType = "Pump Resume",
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
-                    reason = "Pumping resumed",
-                    notes = config.buildNotes { append("Pumping resumed, IOB: ${insulinAmount}U") }
+                    reason = "Pumping resumed"
                 )
             }
             is HypoMinimizerResumeHistoryLog -> {

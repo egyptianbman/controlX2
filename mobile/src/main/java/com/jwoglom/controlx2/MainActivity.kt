@@ -857,6 +857,29 @@ class MainActivity : ComponentActivity() {
                     else -> UserMode.UNKNOWN
                 }
                 dataStore.controlIQInfoResponse.value = message
+                // Persist closed-loop mode to legacy WearX2 prefs so the Nightscout/Nocturne
+                // sync worker can report pumpMode. "Automatic" = standard (full closed-loop).
+                val modeLabel = when (dataStore.controlIQMode.value) {
+                    UserMode.SLEEP -> "Sleep"
+                    UserMode.EXERCISE -> "Exercise"
+                    UserMode.NONE -> "Automatic"
+                    else -> null
+                }
+                this.getSharedPreferences(
+                    "WearX2",
+                    Context.MODE_PRIVATE
+                ).edit().apply {
+                    if (modeLabel == null) {
+                        remove(
+                            com.jwoglom.controlx2.sync.nightscout.NightscoutSyncWorker.PUMP_MODE_KEY
+                        )
+                    } else {
+                        putString(
+                            com.jwoglom.controlx2.sync.nightscout.NightscoutSyncWorker.PUMP_MODE_KEY,
+                            modeLabel
+                        )
+                    }
+                }
                 // Extract CIQ fields via reflection since abstract getters are package-private in Java
                 try {
                     val closedLoopMethod = message.javaClass.getMethod("getClosedLoopEnabled")

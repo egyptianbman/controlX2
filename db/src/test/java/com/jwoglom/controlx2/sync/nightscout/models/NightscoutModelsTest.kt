@@ -120,25 +120,19 @@ class NightscoutModelsTest {
             batteryPercent = 75,
             reservoirUnits = 150.5,
             iob = 3.2,
-            pumpStatus = "normal",
-            uploaderBattery = 90
+            pumpStatus = "normal"
         )
 
-        assertEquals("ControlX2", status.device)
-        assertTrue(status.createdAt.endsWith("Z"))
-        assertEquals(90, status.uploaderBattery)
-        assertEquals(timestamp.atZone(ZoneId.systemDefault()).offset.totalSeconds / 60, status.utcOffset)
+        assertEquals("ControlX2", status.dataSource)
+        assertEquals(status.timestamp, status.syncIdentifier)
+        assertTrue(status.timestamp.endsWith("Z"))
 
-        assertNotNull(status.pump)
-        assertEquals(75, status.pump?.battery?.percent)
-        assertNotNull(status.pump?.reservoir)
-        assertEquals(150.5, status.pump?.reservoir!!, 0.001)
-        assertNotNull(status.pump?.iob?.iob)
-        assertEquals(3.2, status.pump?.iob?.iob!!, 0.001)
-        assertEquals("normal", status.pump?.status?.status)
-        assertEquals(status.createdAt, status.pump?.clock)
-        assertEquals(status.createdAt, status.pump?.iob?.timestamp)
-        assertEquals(status.createdAt, status.pump?.status?.timestamp)
+        assertEquals(75, status.batteryPercent)
+        assertEquals(150.5, status.reservoir!!, 0.001)
+        assertEquals(3.2, status.iob!!, 0.001)
+        assertEquals("normal", status.pumpStatus)
+        // clock mirrors the same instant
+        assertEquals(status.timestamp, status.clock)
     }
 
     @Test
@@ -149,16 +143,13 @@ class NightscoutModelsTest {
             batteryPercent = 50,
             reservoirUnits = null,
             iob = null,
-            pumpStatus = null,
-            uploaderBattery = null
+            pumpStatus = null
         )
 
-        assertNotNull(status.pump)
-        assertEquals(50, status.pump?.battery?.percent)
-        assertNull(status.pump?.reservoir)
-        assertNull(status.pump?.iob)
-        assertNull(status.pump?.status)
-        assertNull(status.uploaderBattery)
+        assertEquals(50, status.batteryPercent)
+        assertNull(status.reservoir)
+        assertNull(status.iob)
+        assertNull(status.pumpStatus)
     }
 
     @Test
@@ -169,17 +160,12 @@ class NightscoutModelsTest {
             batteryPercent = 80,
             iob = 2.0,
             suspended = true,
-            bolusing = false,
-            uploaderBattery = 65,
-            device = "t:slim X2"
+            bolusing = false
         )
 
-        assertEquals("t:slim X2", status.device)
-        assertEquals(65, status.uploaderBattery)
-        assertNotNull(status.pump?.status)
-        assertEquals(true, status.pump?.status?.suspended)
-        assertEquals(false, status.pump?.status?.bolusing)
-        assertEquals("suspended", status.pump?.status?.status)
+        assertEquals("ControlX2", status.dataSource)
+        assertEquals(true, status.suspended)
+        assertEquals(false, status.bolusing)
     }
 
     @Test
@@ -191,9 +177,7 @@ class NightscoutModelsTest {
             suspended = false
         )
 
-        assertNotNull(status.pump?.status)
-        assertEquals(false, status.pump?.status?.suspended)
-        assertEquals("normal", status.pump?.status?.status)
+        assertEquals(false, status.suspended)
     }
 
     @Test
@@ -204,8 +188,10 @@ class NightscoutModelsTest {
             batteryPercent = 80
         )
 
-        // When no status flags are provided, status should be null
-        assertNull(status.pump?.status)
+        // When no status flags are provided, the flat flags stay null
+        assertNull(status.suspended)
+        assertNull(status.bolusing)
+        assertNull(status.pumpStatus)
     }
 
     @Test

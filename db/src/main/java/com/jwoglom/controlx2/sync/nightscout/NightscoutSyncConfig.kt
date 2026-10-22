@@ -24,6 +24,9 @@ data class NightscoutSyncConfig(
 
     // Pump model name for Nightscout device identification
     val pumpModelName: String = "Tandem Pump",
+    // Current pump closed-loop mode for the Nocturne V4 pump snapshot (Automatic/Sleep/Exercise).
+    // Populated at sync time from the persisted user mode; null omits the pumpMode field.
+    val pumpMode: String? = null,
     // Attach human-readable notes to uploaded treatments. Disabled by default to avoid clutter
     // in Nocturne; enable to mirror NightScout's note behavior.
     val includeNotes: Boolean = false,
@@ -103,4 +106,12 @@ data class NightscoutSyncConfig(
      */
     fun buildNotes(builder: StringBuilder.() -> Unit): String? =
         if (includeNotes) buildString(builder) else null
+
+    /**
+     * Build human-readable notes that are ALWAYS uploaded regardless of the [includeNotes] toggle.
+     * Used for announcements/alarms (eventType="Announcement"), which carry non-redundant
+     * information (alert IDs) that must reach Nocturne even when the user disables redundant notes.
+     * Redundant notes (structured treatments) still go through [buildNotes] and stay gated by the toggle.
+     */
+    fun buildAlwaysNotes(builder: StringBuilder.() -> Unit): String = buildString(builder)
 }

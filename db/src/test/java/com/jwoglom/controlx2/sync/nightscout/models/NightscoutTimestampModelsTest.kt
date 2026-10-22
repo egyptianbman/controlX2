@@ -96,20 +96,18 @@ class NightscoutTimestampModelsTest {
 
             assertIsoTimezoneAware(treatment.createdAt)
             assertIsoTimezoneAware(entry.dateString)
-            assertIsoTimezoneAware(status.createdAt)
-            assertIsoTimezoneAware(status.pump?.clock ?: "")
-            assertIsoTimezoneAware(status.pump?.iob?.timestamp ?: "")
+            assertIsoTimezoneAware(status.timestamp)
+            assertIsoTimezoneAware(status.clock ?: "")
 
             val treatmentInstant = Instant.parse(treatment.createdAt)
             val entryInstant = Instant.parse(entry.dateString)
-            val statusInstant = Instant.parse(status.createdAt)
+            val statusInstant = Instant.parse(status.timestamp)
 
             assertEquals(treatmentInstant.toEpochMilli(), treatment.timestamp)
             assertEquals(entryInstant.toEpochMilli(), entry.date)
 
             val expectedOffsetMinutes = timestamp.atZone(ZoneId.systemDefault()).offset.totalSeconds / 60
             assertEquals(expectedOffsetMinutes, treatment.utcOffset)
-            assertEquals(expectedOffsetMinutes, status.utcOffset)
 
             val expectedEpoch = timestamp.atZone(ZoneId.systemDefault()).toInstant().toEpochMilli()
             assertEquals(expectedEpoch, treatment.timestamp)

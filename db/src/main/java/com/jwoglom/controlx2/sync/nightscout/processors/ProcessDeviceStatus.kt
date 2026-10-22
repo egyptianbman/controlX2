@@ -81,8 +81,7 @@ class ProcessDeviceStatus(
             batteryPercent = latestBattery,
             reservoirUnits = latestReservoir,
             iob = latestIob,
-            uploaderBattery = config.uploaderBattery,
-            suspended = suspended,
+            pumpMode = config.pumpMode,
             bolusing = null
         )
 

@@ -230,7 +230,21 @@ class NightscoutSyncCoordinator(
         onProgress: (done: Int, total: Int) -> Unit = { _, _ -> }
     ): SyncResult {
         Timber.i("Starting retroactive sync: $startTime to $endTime")
-        syncStateDao.setRetroactiveRange(startTime, endTime)
+        // setRetroactiveRange is an UPDATE WHERE id=1, a no-op when no state row exists yet
+        // (first sync). Ensure the row exists so the retroactive range persists; otherwise
+        // syncAll() would create a fresh state without it and fall back to the lookback range.
+        if (syncStateDao.getState() == null) {
+            syncStateDao.upsert(
+                NightscoutSyncState(
+                    firstEnabledTime = LocalDateTime.now(),
+                    lookbackHours = config.initialLookbackHours,
+                    retroactiveStartTime = startTime,
+                    retroactiveEndTime = endTime
+                )
+            )
+        } else {
+            syncStateDao.setRetroactiveRange(startTime, endTime)
+        }
         return syncAll(onProgress)
     }
 

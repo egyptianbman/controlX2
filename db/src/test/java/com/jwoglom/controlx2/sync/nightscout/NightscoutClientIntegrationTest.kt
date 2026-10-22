@@ -378,7 +378,7 @@ class NightscoutClientIntegrationTest {
         val status = createDeviceStatus(
             timestamp = LocalDateTime.of(2024, 3, 15, 10, 0, 0),
             batteryPercent = 85, reservoirUnits = 150.0,
-            iob = 3.5, pumpStatus = "normal", uploaderBattery = 72
+            iob = 3.5, pumpStatus = "normal"
         )
 
         val result = client.uploadDeviceStatus(status)
@@ -386,7 +386,7 @@ class NightscoutClientIntegrationTest {
         assertTrue(result.isSuccess)
         assertEquals(1, server.capturedRequests.size)
         assertEquals("POST", server.capturedRequests[0].method)
-        assertEquals("/api/v1/devicestatus", server.capturedRequests[0].path)
+        assertEquals("/api/v4/device-status/pump", server.capturedRequests[0].path)
     }
 
     @Test
@@ -394,7 +394,7 @@ class NightscoutClientIntegrationTest {
         val status = createDeviceStatus(
             timestamp = LocalDateTime.of(2024, 3, 15, 10, 0, 0),
             batteryPercent = 85, reservoirUnits = 150.0,
-            iob = 3.5, pumpStatus = "normal", uploaderBattery = 72
+            iob = 3.5, pumpStatus = "normal"
         )
 
         client.uploadDeviceStatus(status)
@@ -402,21 +402,14 @@ class NightscoutClientIntegrationTest {
         val type = object : TypeToken<List<Map<String, Any>>>() {}.type
         val body: List<Map<String, Any>> = gson.fromJson(server.capturedRequests[0].body, type)
 
+        // V4 posts a one-element flat array (no nested pump object)
         assertEquals(1, body.size)
-        assertEquals("ControlX2", body[0]["device"])
-        assertNotNull(body[0]["created_at"])
-        assertEquals(72.0, body[0]["uploaderBattery"])
-
-        @Suppress("UNCHECKED_CAST")
-        val pump = body[0]["pump"] as Map<String, Any>
-        @Suppress("UNCHECKED_CAST")
-        val battery = pump["battery"] as Map<String, Any>
-        assertEquals(85.0, battery["percent"])
-        assertEquals(150.0, pump["reservoir"])
-
-        @Suppress("UNCHECKED_CAST")
-        val iob = pump["iob"] as Map<String, Any>
-        assertEquals(3.5, iob["iob"])
+        assertEquals("ControlX2", body[0]["dataSource"])
+        assertNotNull(body[0]["timestamp"])
+        assertEquals(85.0, body[0]["batteryPercent"])
+        assertEquals(150.0, body[0]["reservoir"])
+        assertEquals(3.5, body[0]["iob"])
+        assertEquals("normal", body[0]["pumpStatus"])
     }
 
     // --- GET Endpoints ---

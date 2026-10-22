@@ -658,18 +658,16 @@ class NightscoutPipelineIntegrationTest {
         assertTrue("Expected Success, got $result", result is SyncResult.Success)
         assertEquals(1, (result as SyncResult.Success).uploadedCount)
 
-        val statusRequests = server.requestsForPath("/api/v1/devicestatus")
+        val statusRequests = server.requestsForPath("/api/v4/device-status/pump")
         assertEquals(1, statusRequests.size)
         assertEquals("POST", statusRequests[0].method)
 
         val type = object : TypeToken<List<Map<String, Any>>>() {}.type
         val statuses: List<Map<String, Any>> = gson.fromJson(statusRequests[0].body, type)
         assertEquals(1, statuses.size)
-        assertEquals("ControlX2", statuses[0]["device"])
-
-        @Suppress("UNCHECKED_CAST")
-        val pump = statuses[0]["pump"] as? Map<String, Any>
-        assertNotNull(pump)
+        assertEquals("ControlX2", statuses[0]["dataSource"])
+        assertEquals(85.0, statuses[0]["batteryPercent"])
+        assertEquals(3.5, statuses[0]["iob"])
     }
 
     @Test
@@ -703,7 +701,7 @@ class NightscoutPipelineIntegrationTest {
         val treatmentRequests = server.requestsForPath("/api/v1/treatments")
         assertTrue("Expected at least 1 treatment request", treatmentRequests.isNotEmpty())
 
-        val statusRequests = server.requestsForPath("/api/v1/devicestatus")
+        val statusRequests = server.requestsForPath("/api/v4/device-status/pump")
         assertTrue("Expected at least 1 device status request", statusRequests.isNotEmpty())
 
         val entryType = object : TypeToken<List<Map<String, Any>>>() {}.type
@@ -1011,27 +1009,14 @@ class NightscoutPipelineIntegrationTest {
         assertTrue("Expected Success, got $result", result is SyncResult.Success)
         assertEquals(1, (result as SyncResult.Success).uploadedCount)
 
-        val statusRequests = server.requestsForPath("/api/v1/devicestatus")
+        val statusRequests = server.requestsForPath("/api/v4/device-status/pump")
         val type = object : TypeToken<List<Map<String, Any>>>() {}.type
         val statuses: List<Map<String, Any>> = gson.fromJson(statusRequests[0].body, type)
         assertEquals(1, statuses.size)
 
-        @Suppress("UNCHECKED_CAST")
-        val pump = statuses[0]["pump"] as? Map<String, Any>
-        assertNotNull(pump)
-
-        // Battery should be populated from DailyBasal
-        @Suppress("UNCHECKED_CAST")
-        val battery = pump!!["battery"] as? Map<String, Any>
-        assertNotNull(battery)
-        assertEquals(75.0, battery!!["percent"])
-
-        // Pump status should show suspended=true (boolean, not string)
-        @Suppress("UNCHECKED_CAST")
-        val status = pump["status"] as? Map<String, Any>
-        assertNotNull(status)
-        assertEquals(true, status!!["suspended"])
-        assertEquals("suspended", status["status"])
+        // Flat V4 shape: battery from DailyBasal, suspended boolean from the suspension log
+        assertEquals(75.0, statuses[0]["batteryPercent"])
+        assertEquals(true, statuses[0]["suspended"])
     }
 
     @Test
@@ -1054,43 +1039,12 @@ class NightscoutPipelineIntegrationTest {
 
         assertTrue("Expected Success, got $result", result is SyncResult.Success)
 
-        val statusRequests = server.requestsForPath("/api/v1/devicestatus")
+        val statusRequests = server.requestsForPath("/api/v4/device-status/pump")
         val type = object : TypeToken<List<Map<String, Any>>>() {}.type
         val statuses: List<Map<String, Any>> = gson.fromJson(statusRequests[0].body, type)
 
-        @Suppress("UNCHECKED_CAST")
-        val pump = statuses[0]["pump"] as? Map<String, Any>
-        @Suppress("UNCHECKED_CAST")
-        val status = pump!!["status"] as? Map<String, Any>
-        assertNotNull(status)
-        assertEquals(false, status!!["suspended"])
-        assertEquals("normal", status["status"])
-    }
-
-    @Test
-    fun fullPipeline_deviceStatus_uploaderBatteryIncluded() = runBlocking {
-        val now = LocalDateTime.now()
-        val items = listOf(
-            buildHistoryLogItem(24001, now.minusMinutes(5),
-                buildDailyBasalCargo(now.minusMinutes(5), 24001, 90, 1.0f))
-        )
-        items.forEach { historyLogRepo.insert(it) }
-
-        // Config with uploaderBattery set
-        val config = buildConfig(enabledProcessors = setOf(ProcessorType.DEVICE_STATUS))
-            .copy(uploaderBattery = 72)
-        val coordinator = buildCoordinator(config)
-        val result = coordinator.syncAll()
-
-        assertTrue("Expected Success, got $result", result is SyncResult.Success)
-
-        val statusRequests = server.requestsForPath("/api/v1/devicestatus")
-        val type = object : TypeToken<List<Map<String, Any>>>() {}.type
-        val statuses: List<Map<String, Any>> = gson.fromJson(statusRequests[0].body, type)
-        assertEquals(1, statuses.size)
-
-        // Nightscout expects uploaderBattery as a top-level integer
-        assertEquals(72.0, statuses[0]["uploaderBattery"])
+        // Suspension followed by resume -> suspended=false
+        assertEquals(false, statuses[0]["suspended"])
     }
 
     // =========================================================================
@@ -1374,7 +1328,7 @@ class NightscoutPipelineIntegrationTest {
         // Verify all endpoints received data
         val entryRequests = server.requestsForPath("/api/v1/entries")
         val treatmentRequests = server.requestsForPath("/api/v1/treatments")
-        val statusRequests = server.requestsForPath("/api/v1/devicestatus")
+        val statusRequests = server.requestsForPath("/api/v4/device-status/pump")
 
         assertTrue("Entries should be uploaded", entryRequests.isNotEmpty())
         assertTrue("Treatments should be uploaded", treatmentRequests.isNotEmpty())

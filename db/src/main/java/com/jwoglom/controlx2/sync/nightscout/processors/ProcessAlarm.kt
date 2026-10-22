@@ -82,7 +82,7 @@ class ProcessAlarm(
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
                     reason = reason,
-                    notes = config.buildNotes { append("Pump alarm activated, ID: ${parsed.alarmId}") }
+                    notes = config.buildAlwaysNotes { append("Pump alarm activated, ID: ${parsed.alarmId}") }
                 )
             }
             is AlarmClearedHistoryLog -> {
@@ -98,7 +98,7 @@ class ProcessAlarm(
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
                     reason = reason,
-                    notes = config.buildNotes { append("Pump alarm cleared, ID: ${parsed.alarmId}") }
+                   notes = config.buildAlwaysNotes { append("Pump alarm cleared, ID: ${parsed.alarmId}") }
                 )
             }
             is AlertActivatedHistoryLog -> {
@@ -114,7 +114,7 @@ class ProcessAlarm(
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
                     reason = reason,
-                    notes = config.buildNotes { append("Pump alert activated, ID: ${parsed.alertId}") }
+                   notes = config.buildAlwaysNotes { append("Pump alert activated, ID: ${parsed.alertId}") }
                 )
             }
             is AlertClearedHistoryLog -> {
@@ -130,7 +130,7 @@ class ProcessAlarm(
                     timestamp = item.pumpTimeLocal(),
                     seqId = item.seqId,
                     reason = reason,
-                    notes = config.buildNotes { append("Pump alert cleared, ID: ${parsed.alertId}") }
+                   notes = config.buildAlwaysNotes { append("Pump alert cleared, ID: ${parsed.alertId}") }
                 )
             }
             else -> {

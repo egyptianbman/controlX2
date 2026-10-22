@@ -21,6 +21,8 @@ import org.junit.Before
 import org.junit.Test
 import org.junit.runner.RunWith
 import java.time.LocalDateTime
+import java.time.ZoneOffset
+import com.jwoglom.pumpx2.pump.messages.helpers.Dates
 
 /**
  * Integration tests for NightscoutSyncCoordinator
@@ -205,7 +207,7 @@ class NightscoutSyncCoordinatorTest {
     @Test
     fun testRetroactiveSync() = runBlocking {
         // Add historical logs
-        val now = LocalDateTime.now()
+        val now = LocalDateTime.now().withNano(0)
         listOf(
             createHistoryLogItem(100L, now.minusDays(10)),
             createHistoryLogItem(101L, now.minusDays(9)),
@@ -253,11 +255,13 @@ class NightscoutSyncCoordinatorTest {
     }
 
     private fun createHistoryLogItem(seqId: Long, pumpTime: LocalDateTime): HistoryLogItem {
+        val pumpTimeSec = pumpTime.toEpochSecond(ZoneOffset.UTC) - Dates.JANUARY_1_2008_UNIX_EPOCH
         return HistoryLogItem(
             seqId = seqId,
             pumpSid = 123,
             typeId = 1, // Some test type
             cargo = ByteArray(10),
+            pumpTimeSec = pumpTimeSec,
             pumpTime = pumpTime,
             addedTime = LocalDateTime.now()
         )

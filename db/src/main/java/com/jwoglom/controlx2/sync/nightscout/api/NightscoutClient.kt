@@ -74,7 +74,7 @@ class NightscoutClient(
     override suspend fun uploadDeviceStatus(status: NightscoutDeviceStatus): Result<Boolean> {
         return withContext(Dispatchers.IO) {
             try {
-                post("/api/v1/devicestatus", listOf(status))
+                post("/api/v4/device-status/pump", listOf(status))
                 Timber.d("Uploaded device status to Nightscout")
                 Result.success(true)
             } catch (e: Exception) {

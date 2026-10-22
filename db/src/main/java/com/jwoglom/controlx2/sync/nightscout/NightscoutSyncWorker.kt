@@ -105,7 +105,8 @@ class NightscoutSyncWorker(
 
                 val nsDb = NightscoutSyncStateDatabase.getDatabase(context)
                 val configWithModel = config.copy(
-                    pumpModelName = readPumpModelName(context) ?: "Tandem Pump"
+                    pumpModelName = readPumpModelName(context) ?: "Tandem Pump",
+                    pumpMode = readPumpMode(context)
                 )
 
                 val coordinator = NightscoutSyncCoordinator(
@@ -198,6 +199,7 @@ class NightscoutSyncWorker(
 
             val configWithModel = config.copy(
                 pumpModelName = readPumpModelName(context) ?: "Tandem Pump",
+                pumpMode = readPumpMode(context),
                 uploaderBattery = phoneBattery
             )
 
@@ -314,11 +316,14 @@ class NightscoutSyncWorker(
             context.getSharedPreferences(WEARX2_PREFS_FILE, Context.MODE_PRIVATE)
                 .getString(PUMP_MODEL_NAME_KEY, null)
 
+        const val PUMP_MODE_KEY = "control-iq-mode"
+
+        private fun readPumpMode(context: Context): String? =
+            context.getSharedPreferences(WEARX2_PREFS_FILE, Context.MODE_PRIVATE)
+                .getString(PUMP_MODE_KEY, null)
+
         private var instance: NightscoutSyncWorker? = null
 
-        /**
-         * Get or create singleton instance
-         */
         fun getInstance(context: Context, prefs: SharedPreferences, pumpSid: Int): NightscoutSyncWorker {
             return instance ?: synchronized(this) {
                 instance ?: NightscoutSyncWorker(
