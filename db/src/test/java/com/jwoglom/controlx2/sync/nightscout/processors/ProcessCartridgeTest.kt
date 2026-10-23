@@ -10,6 +10,7 @@ import com.jwoglom.controlx2.sync.nightscout.models.NightscoutAnnouncement
 import com.jwoglom.controlx2.sync.nightscout.models.NightscoutDeviceStatus
 import com.jwoglom.controlx2.sync.nightscout.models.NightscoutEntry
 import com.jwoglom.controlx2.sync.nightscout.models.NightscoutProfile
+import com.jwoglom.controlx2.sync.nightscout.models.NightscoutStateSpan
 import com.jwoglom.controlx2.sync.nightscout.models.NightscoutTreatment
 import io.mockk.mockk
 import com.jwoglom.pumpx2.pump.messages.response.historyLog.CannulaFilledHistoryLog
@@ -51,6 +52,9 @@ class ProcessCartridgeTest {
         override suspend fun getAnnouncements(count: Int): Result<List<NightscoutAnnouncement>> = Result.success(emptyList())
         override suspend fun getAnnouncementsSince(sinceTimestamp: Long?, sinceId: String?, count: Int): Result<List<NightscoutAnnouncement>> =
             Result.success(emptyList())
+        override suspend fun getActivePumpModeSpans(): Result<List<NightscoutStateSpan>> = Result.success(emptyList())
+        override suspend fun createStateSpan(span: NightscoutStateSpan): Result<NightscoutStateSpan> = Result.success(span)
+        override suspend fun closeStateSpan(id: String, endMills: Long): Result<Boolean> = Result.success(true)
     }
 
     private fun tubing(seq: Long, prime: Float, status: Long, position: Long = 0L): HistoryLogItem {

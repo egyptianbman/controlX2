@@ -2,6 +2,7 @@ package com.jwoglom.controlx2.sync.nightscout.api
 
 import com.google.gson.Gson
 import com.google.gson.JsonSyntaxException
+import com.google.gson.JsonElement
 import com.google.gson.reflect.TypeToken
 import com.jwoglom.controlx2.sync.nightscout.NightscoutApiSecretHeader
 import com.jwoglom.controlx2.sync.nightscout.hashNightscoutApiSecret
@@ -10,6 +11,7 @@ import com.jwoglom.controlx2.sync.nightscout.models.NightscoutDeviceStatus
 import com.jwoglom.controlx2.sync.nightscout.models.NightscoutEntry
 import com.jwoglom.controlx2.sync.nightscout.models.NightscoutProfile
 import com.jwoglom.controlx2.sync.nightscout.models.NightscoutTreatment
+import com.jwoglom.controlx2.sync.nightscout.models.NightscoutStateSpan
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
 import timber.log.Timber
@@ -19,6 +21,7 @@ import java.io.InputStreamReader
 import java.io.OutputStreamWriter
 import java.net.HttpURLConnection
 import java.net.URL
+import java.net.URLEncoder
 
 /**
  * Nightscout API client implementation
@@ -92,6 +95,70 @@ class NightscoutClient(
                 Result.success(true)
             } catch (e: Exception) {
                 Timber.e(e, "Failed to upload profile to Nightscout")
+                Result.failure(e)
+            }
+        }
+    }
+
+    override suspend fun getActivePumpModeSpans(): Result<List<NightscoutStateSpan>> {
+        return withContext(Dispatchers.IO) {
+            try {
+                // GET /api/v4/state-spans?category=PumpMode&active=true
+                // Response envelope: {"data":[...],"pagination":{...}}
+                val json = get("/api/v4/state-spans?category=PumpMode&active=true")
+                val root = gson.fromJson(json, JsonElement::class.java)
+                val spans = root.getAsJsonObject().getAsJsonArray("data")
+                    .let { array ->
+                        (0 until array.size()).map { i ->
+                            gson.fromJson(array.get(i), NightscoutStateSpan::class.java)
+                        }
+                    }
+                Timber.d("Fetched ${spans.size} open PumpMode spans")
+                Result.success(spans)
+            } catch (e: NightscoutAuthException) {
+                Timber.w(e, "Nocturne auth failed while fetching PumpMode spans")
+                Result.failure(e)
+            } catch (e: JsonSyntaxException) {
+                val wrapped = IllegalArgumentException("Malformed state-spans response", e)
+                Timber.e(wrapped)
+                Result.failure(wrapped)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to fetch open PumpMode spans")
+                Result.failure(e)
+            }
+        }
+    }
+
+    override suspend fun createStateSpan(span: NightscoutStateSpan): Result<NightscoutStateSpan> {
+        return withContext(Dispatchers.IO) {
+            try {
+                // POST /api/v4/state-spans -> 201; body is the created span (includes id)
+                val json = post("/api/v4/state-spans", span)
+                val created = gson.fromJson(json, NightscoutStateSpan::class.java)
+                Timber.d("Created PumpMode span ${created.id} (${created.state})")
+                Result.success(created)
+            } catch (e: NightscoutAuthException) {
+                Timber.w(e, "Nocturne auth failed while creating PumpMode span")
+                Result.failure(e)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to create PumpMode span")
+                Result.failure(e)
+            }
+        }
+    }
+
+    override suspend fun closeStateSpan(id: String, endMills: Long): Result<Boolean> {
+        return withContext(Dispatchers.IO) {
+            try {
+                // PUT /api/v4/state-spans/{id} {"endMills": <millis>}
+                put("/api/v4/state-spans/${URLEncoder.encode(id, "UTF-8")}", mapOf("endMills" to endMills))
+                Timber.d("Closed PumpMode span $id at $endMills")
+                Result.success(true)
+            } catch (e: NightscoutAuthException) {
+                Timber.w(e, "Nocturne auth failed while closing PumpMode span")
+                Result.failure(e)
+            } catch (e: Exception) {
+                Timber.e(e, "Failed to close PumpMode span")
                 Result.failure(e)
             }
         }
@@ -209,6 +276,34 @@ class NightscoutClient(
             connection.setRequestProperty(NightscoutApiSecretHeader, apiSecretHash)
             connection.connectTimeout = 30000
             connection.readTimeout = 30000
+
+            val responseCode = connection.responseCode
+            if (responseCode in 200..299) {
+                readResponseBody(connection.inputStream)
+            } else {
+                throw createHttpException(responseCode, readResponseBody(connection.errorStream))
+            }
+        } finally {
+            connection.disconnect()
+        }
+    }
+
+    private fun put(endpoint: String, body: Any): String {
+        val url = URL("$baseUrl$endpoint")
+        val connection = url.openConnection() as HttpURLConnection
+
+        return try {
+            connection.requestMethod = "PUT"
+            connection.setRequestProperty("Content-Type", "application/json")
+            connection.setRequestProperty(NightscoutApiSecretHeader, apiSecretHash)
+            connection.doOutput = true
+            connection.connectTimeout = 30000
+            connection.readTimeout = 30000
+
+            val writer = OutputStreamWriter(connection.outputStream)
+            writer.write(gson.toJson(body))
+            writer.flush()
+            writer.close()
 
             val responseCode = connection.responseCode
             if (responseCode in 200..299) {

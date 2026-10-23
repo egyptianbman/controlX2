@@ -11,6 +11,7 @@ import com.jwoglom.controlx2.sync.nightscout.models.NightscoutDeviceStatus
 import com.jwoglom.controlx2.sync.nightscout.models.NightscoutEntry
 import io.mockk.mockk
 import com.jwoglom.controlx2.sync.nightscout.models.NightscoutProfile
+import com.jwoglom.controlx2.sync.nightscout.models.NightscoutStateSpan
 import com.jwoglom.controlx2.sync.nightscout.models.NightscoutTreatment
 import com.jwoglom.pumpx2.pump.messages.response.historyLog.BolusDeliveryHistoryLog
 import kotlinx.coroutines.runBlocking
@@ -63,7 +64,10 @@ class ProcessBolusTest {
             sinceId: String?,
             count: Int
         ): Result<List<NightscoutAnnouncement>> = Result.success(emptyList())
-    }
+        override suspend fun getActivePumpModeSpans(): Result<List<NightscoutStateSpan>> = Result.success(emptyList())
+        override suspend fun createStateSpan(span: NightscoutStateSpan): Result<NightscoutStateSpan> = Result.success(span)
+        override suspend fun closeStateSpan(id: String, endMills: Long): Result<Boolean> = Result.success(true)
+}
 
     /**
      * Build a HistoryLogItem wrapping a real BolusDeliveryHistoryLog.
