@@ -755,6 +755,10 @@ class PumpCommHandler(
                         val ageSeconds = Duration.between(response?.second, Instant.now()).seconds
                         if (ageSeconds <= CacheSeconds) {
                             Timber.i("pumpCommHandler cached hit: $response")
+                            // Route through the always-running service callback so pump-mode
+                            // (and any other service-side handling) runs for cached/reprocessed
+                            // responses, not only the live BLE path.
+                            response?.first?.let { callbacks.onPumpMessageReceived(it, com.jwoglom.controlx2.shared.util.SendType.STANDARD) }
                             callbacks.sendWearCommMessage(
                                 MessagePaths.FROM_PUMP_RECEIVE_CACHED_MESSAGE,
                                 PumpMessageSerializer.toBytes(response?.first)

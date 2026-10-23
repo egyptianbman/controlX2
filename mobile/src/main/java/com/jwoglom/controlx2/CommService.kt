@@ -36,6 +36,7 @@ import com.jwoglom.controlx2.pump.PumpSession
 import com.jwoglom.controlx2.shared.enums.GlucoseUnit
 import com.jwoglom.controlx2.shared.util.SendType
 import com.jwoglom.controlx2.sync.nightscout.NightscoutSyncWorker
+import com.jwoglom.pumpx2.pump.messages.response.currentStatus.ControlIQInfoAbstractResponse
 import com.jwoglom.controlx2.sync.xdrip.XdripMessageDispatcher
 import com.jwoglom.controlx2.util.DataClientState
 import com.jwoglom.controlx2.util.HistoryLogFetcher
@@ -495,6 +496,29 @@ class CommService : Service(), CommServiceCallbacks {
     // --- Debug API callbacks ---
     override fun onPumpMessageReceived(message: com.jwoglom.pumpx2.pump.messages.Message, source: SendType) {
         httpDebugApiService?.onPumpMessageReceived(message, source = source)
+        // Persist closed-loop mode to the legacy WearX2 prefs so the Nightscout/Nocturne
+        // sync worker can report pumpMode. Written in the always-running service (not
+        // MainActivity) so pumpMode stays correct while the UI is backgrounded, and for any
+        // cached/reprocessed response routed through this callback. "Automatic" = standard
+        // (full closed-loop).
+        if (message is ControlIQInfoAbstractResponse) {
+            val modeLabel = when (message.currentUserModeType) {
+                ControlIQInfoAbstractResponse.UserModeType.SLEEP -> "Sleep"
+                ControlIQInfoAbstractResponse.UserModeType.EXERCISE -> "Exercise"
+                ControlIQInfoAbstractResponse.UserModeType.STANDARD -> "Automatic"
+                else -> null
+            }
+            val key = NightscoutSyncWorker.PUMP_MODE_KEY
+            val prefs = getSharedPreferences("WearX2", Context.MODE_PRIVATE)
+            val editor = prefs.edit()
+            if (modeLabel == null) {
+                editor.remove(key)
+            } else {
+                editor.putString(key, modeLabel)
+            }
+            // commit() flushes the editor — Kotlin's apply{} block does NOT persist changes.
+            editor.commit()
+        }
     }
 
     override fun onPumpCriticalError(error: TandemError, source: SendType) {
