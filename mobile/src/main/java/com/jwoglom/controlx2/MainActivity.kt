@@ -427,11 +427,11 @@ class MainActivity : ComponentActivity() {
         val numCarbs = params.carbsGrams
         val bgValue = params.glucoseMgdl
 
-        val bolusTypes = mutableListOf(BolusDeliveryHistoryLog.BolusType.FOOD2)
+        val bolusTypes = mutableListOf(BolusDeliveryHistoryLog.BolusType.NOW)
 
         val foodVolume = InsulinUnit.from1To1000(unitBreakdown.fromCarbs)
         if (foodVolume > 0) {
-            bolusTypes.add(BolusDeliveryHistoryLog.BolusType.FOOD1)
+            bolusTypes.add(BolusDeliveryHistoryLog.BolusType.CARB)
         }
 
         var corrVolume = InsulinUnit.from1To1000(unitBreakdown.fromBG) + InsulinUnit.from1To1000(unitBreakdown.fromIOB)

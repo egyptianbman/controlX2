@@ -20,7 +20,7 @@ class HistoryLogItemTest {
             4_242L,
             123,
             1,
-            setOf(BolusDeliveryHistoryLog.BolusType.FOOD1),
+            setOf(BolusDeliveryHistoryLog.BolusType.NOW),
             BolusDeliveryHistoryLog.BolusSource.QUICK_BOLUS,
             0,
             1_500,

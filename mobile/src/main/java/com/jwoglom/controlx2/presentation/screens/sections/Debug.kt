@@ -1349,7 +1349,7 @@ fun triggerInitiateBolusRequestDialog(
                         InitiateBolusRequest(
                             numUnits.toLong(),
                             bolusId,
-                            BolusDeliveryHistoryLog.BolusType.toBitmask(BolusDeliveryHistoryLog.BolusType.FOOD2),
+                            BolusDeliveryHistoryLog.BolusType.toBitmask(BolusDeliveryHistoryLog.BolusType.NOW),
                             0L,
                             0L,
                             0,

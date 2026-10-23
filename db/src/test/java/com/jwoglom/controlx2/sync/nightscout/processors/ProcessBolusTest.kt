@@ -83,7 +83,7 @@ class ProcessBolusTest {
             seqNum,         // sequenceNum -> HistoryLogItem.seqId -> clientTreatmentId
             bolusID,
             2,
-            setOf(BolusDeliveryHistoryLog.BolusType.FOOD1),
+            setOf(BolusDeliveryHistoryLog.BolusType.NOW),
             BolusDeliveryHistoryLog.BolusSource.QUICK_BOLUS,
             0,
             requestedNow,
