@@ -29,6 +29,46 @@ class ProcessCarb(
         )
     }
 
+    /**
+     * Keep only the last carb entry before each bolus boundary.
+     *
+     * The Tandem pump logs a fresh CarbEnteredHistoryLog every time the carbs field is confirmed,
+     * so editing the carbs before approving a bolus produces a tight cluster of entries (one per
+     * edit). Only the final value is real; the earlier ones are intermediate edits that were never
+     * delivered. [bolusBoundarySeqIds] is the set of seqIds marking a bolus boundary (a
+     * BolusRequested, typeId 64); we keep the last carb entry before each boundary. Carbs with no
+     * following boundary (a carb-only entry) are kept unchanged so they are never dropped.
+     */
+    override fun dedupeComboBolus(
+        logs: List<HistoryLogItem>,
+        maxProcessedBolusId: Int,
+        bolusBoundarySeqIds: Set<Long>
+    ): Pair<List<HistoryLogItem>, Int> {
+        if (bolusBoundarySeqIds.isEmpty()) {
+            return logs to maxProcessedBolusId
+        }
+        val boundaries = bolusBoundarySeqIds.sorted()
+        val kept = mutableListOf<HistoryLogItem>()
+        var carbIndex = 0
+        for (boundary in boundaries) {
+            // Advance to the last carb entry strictly before this boundary.
+            var lastBefore = -1
+            while (carbIndex < logs.size && logs[carbIndex].seqId < boundary) {
+                lastBefore = carbIndex
+                carbIndex++
+            }
+            if (lastBefore >= 0) {
+                kept.add(logs[lastBefore])
+            }
+        }
+        // Trailing carbs after the last boundary: keep unchanged (no following bolus to approve).
+        while (carbIndex < logs.size) {
+            kept.add(logs[carbIndex])
+            carbIndex++
+        }
+        return kept to maxProcessedBolusId
+    }
+
     override suspend fun process(
         logs: List<HistoryLogItem>,
         config: NightscoutSyncConfig

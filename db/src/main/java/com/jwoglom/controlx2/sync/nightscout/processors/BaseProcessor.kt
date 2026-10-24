@@ -62,12 +62,18 @@ abstract class BaseProcessor(
      * delivery update becomes a separate treatment that "builds up". The default returns the logs
      * unchanged; ProcessBolus overrides this to keep only the first (start-time) entry per bolusID.
      *
+     * ProcessCarb overrides this too, using [bolusBoundarySeqIds] to keep only the last carb entry
+     * before each bolus request (see that override).
+     *
      * @param logs logs already filtered to this processor's supported types and sorted by seqId
      * @param maxProcessedBolusId highest pump bolusID already uploaded in a prior sync
+     * @param bolusBoundarySeqIds seqIds of the events that mark a bolus boundary; used by
+     *   ProcessCarb to drop intermediate carb edits
      * @return filtered logs to upload, paired with the updated maxProcessedBolusId cursor
      */
     open fun dedupeComboBolus(
         logs: List<HistoryLogItem>,
-        maxProcessedBolusId: Int
+        maxProcessedBolusId: Int,
+        bolusBoundarySeqIds: Set<Long> = emptySet()
     ): Pair<List<HistoryLogItem>, Int> = logs to maxProcessedBolusId
 }

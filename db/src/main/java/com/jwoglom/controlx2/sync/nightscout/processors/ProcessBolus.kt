@@ -39,7 +39,8 @@ class ProcessBolus(
      */
     override fun dedupeComboBolus(
         logs: List<HistoryLogItem>,
-        maxProcessedBolusId: Int
+        maxProcessedBolusId: Int,
+        bolusBoundarySeqIds: Set<Long>
     ): Pair<List<HistoryLogItem>, Int> {
         val seen = HashSet<Int>()
         val result = mutableListOf<HistoryLogItem>()

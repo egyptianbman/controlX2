@@ -95,6 +95,13 @@ class NightscoutSyncCoordinator(
         // Fetch all history logs in range
         val allLogs = historyLogRepo.getRange(pumpSid, startSeqId, endSeqId).first()
 
+        // "Bolus boundary" seqIds: the BolusRequested (typeId 64, first of the three-part
+        // approval message) that confirms a bolus. Carbs entered then edited before approving form
+        // a tight cluster; ProcessCarb keeps only the last carb entry before each boundary, so the
+        // intermediate edits are not synced. Automatic basal deliveries have no boundary, so they
+        // never pick up a carb treatment.
+        val bolusBoundarySeqIds = allLogs.filter { it.typeId == 64 }.map { it.seqId }.toSet()
+
         if (allLogs.isEmpty()) {
             Timber.d("No history logs found in range $startSeqId..$endSeqId")
             return SyncResult.NoData
@@ -156,7 +163,7 @@ class NightscoutSyncCoordinator(
 
             // Dedup combo/dual bolus delivery updates: keep only the first (start-time) entry per
             // pump bolusID; nocturne collapses the rest via the stable sync_identifier.
-            val (relevantLogs, newMaxBolusId) = processor.dedupeComboBolus(candidateLogs, currentMaxBolusId)
+            val (relevantLogs, newMaxBolusId) = processor.dedupeComboBolus(candidateLogs, currentMaxBolusId, bolusBoundarySeqIds)
             // Progress counts the pre-dedup candidate set, not items uploaded: DEVICE_STATUS
             // aggregates 1,107 logs into 1 item, and combo-bolus dedup collapses several logs into
             // one treatment (still synced via sync_identifier). Using candidateLogs.size (before
