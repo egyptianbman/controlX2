@@ -33,6 +33,7 @@ interface CommServiceCallbacks {
     fun prefConnectionSharingEnabled(): Boolean
     fun prefOnlySnoopBluetoothEnabled(): Boolean
     fun prefInsulinDeliveryActions(): Boolean
+    fun prefServiceEnabled(): Boolean
     fun prefQualifyingEventToastsEnabled(): Boolean
     fun prefGlucoseUnit(): GlucoseUnit?
     fun prefSetPumpModelName(name: String)

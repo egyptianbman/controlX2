@@ -54,6 +54,8 @@ import androidx.compose.ui.unit.sp
 import androidx.navigation.NavHostController
 import com.jwoglom.controlx2.Prefs
 import com.jwoglom.controlx2.R
+import com.jwoglom.controlx2.MainActivity
+import com.jwoglom.controlx2.db.historylog.HistoryLogDatabase
 import com.jwoglom.controlx2.presentation.components.HeaderLine
 import com.jwoglom.controlx2.presentation.navigation.Screen
 import com.jwoglom.controlx2.presentation.screens.sections.components.VersionInfo
@@ -156,6 +158,8 @@ fun Settings(
                         },
                         modifier = Modifier.clickable {
                             Prefs(context).setServiceEnabled(true)
+                            // Ask to leave battery optimization once, the moment the service is on.
+                            (context as? MainActivity)?.checkBatteryOptimization()
                             coroutineScope.launch {
                                 delay(250)
                                 // reload service, if running

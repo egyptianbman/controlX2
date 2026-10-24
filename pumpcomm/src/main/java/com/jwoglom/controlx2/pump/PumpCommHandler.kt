@@ -93,6 +93,13 @@ class PumpCommHandler(
     fun isPumpReadyForHistoryFetch(): Boolean {
         return currentSession?.isActive == true
     }
+    /**
+     * Release the BLE wake lock. Called by CommService.onDestroy() as a safety net so the
+     * lock is never held past the handler's lifetime if onPumpDisconnected did not fire.
+     */
+    fun releaseWakeLock() {
+        PumpWakeLock.release()
+    }
 
     /**
      * Tear down any live BLE pump connection, blocking up to [timeoutMs] for
@@ -495,6 +502,7 @@ class PumpCommHandler(
         }
 
         override fun onPumpConnected(peripheral: BluetoothPeripheral?) {
+            PumpWakeLock.acquire(callbacks.getApplicationContext(), callbacks.prefServiceEnabled())
             initializeConnection(peripheral!!)
             initializeHistoryAndSync()
             waitForResponseStabilization()
@@ -521,6 +529,7 @@ class PumpCommHandler(
             peripheral: BluetoothPeripheral?,
             status: HciStatus?
         ): Boolean {
+            PumpWakeLock.release()
             Timber.i("service onPumpDisconnected: isConnected=false")
             currentSession?.close()
             currentSession = null

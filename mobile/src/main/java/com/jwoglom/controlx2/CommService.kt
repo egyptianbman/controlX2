@@ -1,5 +1,6 @@
 package com.jwoglom.controlx2
 
+import android.app.AlarmManager
 import android.app.Notification
 import android.app.NotificationChannel
 import android.app.NotificationManager
@@ -461,6 +462,7 @@ class CommService : Service(), CommServiceCallbacks {
     override fun prefConnectionSharingEnabled() = Prefs(applicationContext).connectionSharingEnabled()
     override fun prefOnlySnoopBluetoothEnabled() = Prefs(applicationContext).onlySnoopBluetoothEnabled()
     override fun prefInsulinDeliveryActions() = Prefs(applicationContext).insulinDeliveryActions()
+    override fun prefServiceEnabled() = Prefs(applicationContext).serviceEnabled()
     override fun prefQualifyingEventToastsEnabled() = Prefs(applicationContext).qualifyingEventToastsEnabled()
     override fun prefGlucoseUnit(): GlucoseUnit? = Prefs(applicationContext).glucoseUnit()
     override fun prefSetPumpModelName(name: String) { Prefs(applicationContext).setPumpModelName(name) }
@@ -844,11 +846,47 @@ class CommService : Service(), CommServiceCallbacks {
         super.onDestroy()
         unregisterAppReloadShutdownHook(appReloadShutdownHook)
         pumpCommHandler?.stopHistoryLogSyncWorker()
+        pumpCommHandler?.releaseWakeLock()
         scope.cancel()
         messageBus.close()
         httpDebugApiService?.stop()
         Toast.makeText(this, "ControlX2 service destroyed", Toast.LENGTH_SHORT).show()
+        rescheduleRestartIfEnabled()
     }
+
+    /**
+     * Re-arm the service after the OS kills it (Doze, low-memory) so a crash or kill does not
+     * leave the pump unmonitored until the app is reopened.
+     *
+     * Gated on serviceEnabled(): if the user disabled the service we must not resurrect it.
+     * setExactAndAllowWhileIdle lets the wakeup survive Doze, matching xdrip's onDestroy
+     * self-restart. Fired PendingIntent calls onStartCommand, which calls startForeground
+     * promptly, so the API 28+ foreground-from-background restriction does not apply.
+     */
+    private fun rescheduleRestartIfEnabled() {
+        if (!Prefs(this).serviceEnabled()) return
+        val alarm = getSystemService(Context.ALARM_SERVICE) as AlarmManager
+        val intent = Intent(this, CommService::class.java)
+        val pending = PendingIntent.getService(
+            this, RESTART_SERVICE_REQUEST_CODE, intent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
+        )
+        try {
+            alarm.cancel(pending)
+        } catch (_: Exception) {
+            // ignore — a stale alarm is harmless
+        }
+        val wakeAt = System.currentTimeMillis() + RESTART_DELAY_MS
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+            alarm.setExactAndAllowWhileIdle(AlarmManager.RTC_WAKEUP, wakeAt, pending)
+        } else {
+            alarm.setExact(AlarmManager.RTC_WAKEUP, wakeAt, pending)
+        }
+        Timber.i("Scheduled CommService self-restart in ${RESTART_DELAY_MS}ms")
+    }
+
+    private val RESTART_DELAY_MS = 2000L
+    private val RESTART_SERVICE_REQUEST_CODE = 0x5A11
 
     private fun createNotification(): Notification {
         val notificationChannelId = "ControlX2 Background Notification"

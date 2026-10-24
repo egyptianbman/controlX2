@@ -17,6 +17,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.IBinder
+import android.os.PowerManager
 import android.provider.Settings
 import android.widget.Toast
 import androidx.activity.ComponentActivity
@@ -344,6 +345,46 @@ class MainActivity : ComponentActivity() {
                 applicationContext.bindService(intent, commServiceConnection, BIND_AUTO_CREATE)
             }
         }
+    }
+    /**
+     * Prompt the user to ignore battery optimizations for this app, gated on the background
+     * service being enabled (the same gate as the rest of the keep-alive work).
+     *
+     * Doze silently kills background BLE collection on Android M+, so without whitelist
+     * exemption the service dies hours after launch. Ported from xdrip's
+     * Home.checkBatteryOptimization(); the ask count is capped so it does not nag.
+     *
+     * @return true if the app is already whitelisted or the feature is unavailable (pre-M).
+     */
+    private var batteryOptAskCount = 0
+    private val MAX_BATTERY_OPT_ASKS = 40
+
+    fun checkBatteryOptimization(): Boolean {
+        if (Build.VERSION.SDK_INT < Build.VERSION_CODES.M) {
+            return true
+        }
+        val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+        if (pm.isIgnoringBatteryOptimizations(packageName)) {
+            return true
+        }
+        if (!Prefs(this).serviceEnabled()) {
+            return false
+        }
+        // ponytail: session-limited ask cap; does not persist across process death, so a
+        // reboot re-arms the prompt. Acceptable — a reboot implies the user reopened the app.
+        if (batteryOptAskCount++ < MAX_BATTERY_OPT_ASKS) {
+            AlertDialog.Builder(this)
+                .setTitle("Battery optimization")
+                .setMessage("ControlX2 needs to run in the background to keep pump data flowing. Allow it to run without battery optimization?")
+                .setPositiveButton("Allow") { _, _ ->
+                    startActivity(Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+                        data = Uri.parse("package:$packageName")
+                    })
+                }
+                .setNegativeButton("Cancel", null)
+                .show()
+        }
+        return false
     }
 
     private val commServiceConnection = object : ServiceConnection {
