@@ -9,7 +9,7 @@ import com.jwoglom.controlx2.sync.nightscout.models.NightscoutStateSpan
 import com.jwoglom.pumpx2.pump.messages.response.historyLog.ControlIQUserModeChangeHistoryLog
 import com.jwoglom.pumpx2.pump.messages.response.historyLog.HistoryLogParser
 import timber.log.Timber
-import java.time.ZoneOffset
+import com.jwoglom.controlx2.sync.nightscout.NightscoutTimestampPolicy
 
 /**
  * Control-IQ user mode changes.
@@ -58,7 +58,11 @@ class ProcessUserMode(
             NightscoutStateSpan(
                 category = "PumpMode",
                 state = state,
-                startMills = item.pumpTimeMillis(),
+                // pumpTimeLocal() is the pump's LOCAL wall-clock read as a naive instant; route it
+                // through the shared Nightscout timestamp policy (the same path every treatment
+                // uses) so it is interpreted in the device zone, not straight as UTC. Sending the
+                // raw fake-UTC value rendered mode spans hours early (exercise at 9a.m. -> 4a.m.).
+                startMills = NightscoutTimestampPolicy.fromPumpTime(item.pumpTimeLocal()).epochMillis,
                 originalId = "controlx2_mode_${item.seqId}"
             )
         }
@@ -127,7 +131,4 @@ class ProcessUserMode(
             ControlIQUserModeChangeHistoryLog.UserMode.EATING_SOON -> "Automatic"
         }
     }
-
-    private fun HistoryLogItem.pumpTimeMillis(): Long =
-        pumpTimeLocal().toInstant(ZoneOffset.UTC).toEpochMilli()
 }

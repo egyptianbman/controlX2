@@ -17,7 +17,9 @@ import kotlinx.coroutines.runBlocking
 import org.junit.Assert.*
 import org.junit.Before
 import org.junit.Test
+import com.jwoglom.controlx2.sync.nightscout.NightscoutTimestampPolicy
 import java.time.ZoneOffset
+import java.util.TimeZone
 
 /**
  * JVM unit tests for Control-IQ mode changes -> Nocturne PumpMode state spans.
@@ -79,7 +81,7 @@ class ProcessUserModeTest {
     }
 
     private fun HistoryLogItem.millis(): Long =
-        pumpTimeLocal().toInstant(ZoneOffset.UTC).toEpochMilli()
+        NightscoutTimestampPolicy.fromPumpTime(pumpTimeLocal()).epochMillis
 
     private fun process(
         logs: List<HistoryLogItem>,
@@ -179,5 +181,29 @@ class ProcessUserModeTest {
         assertEquals(sleep.millis(), api.createdSpans[0].endMills)  // skips over seq 2
         assertEquals("Sleep", api.createdSpans[1].state)
         assertNull(api.createdSpans[1].endMills)
+    }
+
+    @Test
+    fun spanStartTime_interpretsPumpLocalInDeviceZoneNotUtc() {
+        // Regression: a span must be emitted at the true instant (pump-local wall-clock
+        // interpreted in the device zone), not at the raw fake-UTC value. The bug rendered spans
+        // hours early (exercise at 9a.m. -> 4a.m. in CDT). Pin it in a fixed Etc/GMT-2 (UTC+2) zone so the
+        // expected instant is deterministic regardless of the host timezone.
+        val original = TimeZone.getDefault()
+        try {
+            TimeZone.setDefault(TimeZone.getTimeZone("Etc/GMT-2"))
+            val item = mode(seq = 1, pumpTimeSec = 1_000, currentUserMode = MODE_EXERCISE)
+            val api = process(listOf(item))
+
+            // Buggy value: naive pump wall-clock read straight as UTC (the pre-fix behavior).
+            val buggyUtcMillis = item.pumpTimeLocal().toInstant(ZoneOffset.UTC).toEpochMilli()
+            // Correct value: same wall-clock interpreted in Etc/GMT-2 (UTC+2) -> the true instant is 2h earlier.
+            val correctMillis = buggyUtcMillis - 2 * 3600_000L
+
+            assertEquals(correctMillis, api.createdSpans[0].startMills)
+            assertNotEquals(buggyUtcMillis, api.createdSpans[0].startMills)
+        } finally {
+            TimeZone.setDefault(original)
+        }
     }
 }
