@@ -99,6 +99,17 @@ class NightscoutSyncCoordinator(
             Timber.d("No history logs found in range $startSeqId..$endSeqId")
             return SyncResult.NoData
         }
+
+        // Progress counts logs a processor can actually upload, not every log in range: many
+        // logs (CGM state, Control-IQ cycles, IDP lists...) carry typeIds no supported
+        // processor recognizes and so are never uploaded. Use the syncable count as the bar
+        // denominator so it can reach 100% instead of capping at (syncable / total).
+        val syncableTypeIds = processorOrder
+            .mapNotNull { processorMap[it] }
+            .filter { it.isEnabled(config) }
+            .flatMap { it.supportedTypeIds() }
+            .toSet()
+        val syncableCount = allLogs.count { it.typeId in syncableTypeIds }
         // Retroactive re-send: the selected range is a re-upload, not a resume. The per-processor
         // cursors are already past this range, so reset every processor cursor (and the global
         // fallback) below the range start to force re-processing and re-uploading of the range.
@@ -109,16 +120,21 @@ class NightscoutSyncCoordinator(
         Timber.i("Syncing ${allLogs.size} history logs (seqId $startSeqId..$endSeqId)")
 
         var totalUploaded = 0
+        // Logs consumed so far, driving the log-based progress bar (done/total).
+        var processedLogs = 0
         val latestSeqId = allLogs.maxOf { it.seqId }
+        // Progress is in logs, not processors: total is the syncable count. done grows as each
+        // chunk is uploaded, driven by the onChunkProgress hook below -- so the bar advances in
+        // ~chunk-size steps instead of jumping a whole processor's worth at once. Cleared after.
+        nightscoutApi.onChunkProgress = { items ->
+            processedLogs = (processedLogs + items).coerceAtMost(syncableCount)
+            onProgress?.invoke(processedLogs, syncableCount)
+        }
 
-        // Signal the start of processing so the progress bar begins at 0 of total.
-        onProgress?.invoke(0, processorOrder.size)
+        onProgress?.invoke(0, syncableCount)
 
         // SEQUENTIAL processing (not parallel!) with per-processor cursors
-        for ((index, processorType) in processorOrder.withIndex()) {
-            // Report progress at the start of each processor so skipped (disabled/empty) ones
-            // still advance the bar; the final iteration reports total, filling the indicator.
-            onProgress?.invoke(index + 1, processorOrder.size)
+        for (processorType in processorOrder) {
             val processor = processorMap[processorType] ?: continue
 
             if (!processor.isEnabled(config)) {
@@ -141,6 +157,11 @@ class NightscoutSyncCoordinator(
             // Dedup combo/dual bolus delivery updates: keep only the first (start-time) entry per
             // pump bolusID; nocturne collapses the rest via the stable sync_identifier.
             val (relevantLogs, newMaxBolusId) = processor.dedupeComboBolus(candidateLogs, currentMaxBolusId)
+            // Progress counts the pre-dedup candidate set, not items uploaded: DEVICE_STATUS
+            // aggregates 1,107 logs into 1 item, and combo-bolus dedup collapses several logs into
+            // one treatment (still synced via sync_identifier). Using candidateLogs.size (before
+            // dedup) keeps both from stalling the bar. Capture the baseline, then clamp after.
+            val processorStartLogs = processedLogs
 
             if (relevantLogs.isEmpty()) {
                 Timber.d("No logs for processor ${processorType.name}")
@@ -170,12 +191,23 @@ class NightscoutSyncCoordinator(
                     )
                 )
 
+                // Progress counts *logs consumed*, not items uploaded: a processor like DEVICE_STATUS
+                // aggregates 1,107 logs into a single item, so a per-item hook would stall the bar.
+                // Clamp up to the log target here; never regress below the per-chunk hook's value.
+                processedLogs = processedLogs
+                    .coerceAtLeast(processorStartLogs + candidateLogs.size)
+                    .coerceAtMost(syncableCount)
+                onProgress?.invoke(processedLogs, syncableCount)
                 Timber.i("${processorType.name}: processed ${relevantLogs.size} logs, uploaded $uploadedCount items")
             } catch (e: Exception) {
                 Timber.e(e, "Error processing ${processorType.name}")
                 // Do NOT advance this processor's cursor -- it will retry next sync
             }
         }
+
+        // Clear the per-chunk hook now that the run is done.
+        nightscoutApi.onChunkProgress = null
+        onProgress?.invoke(processedLogs, syncableCount)
 
         // Update global sync state (used as fallback minimum for new processors)
         syncStateDao.updateLastProcessed(latestSeqId, LocalDateTime.now())

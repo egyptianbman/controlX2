@@ -548,7 +548,7 @@ suspend fun openNightscoutRangeDialog(
             return@rangeSliderRangeDialog
         }
 
-        // Prime the bar, then let the worker drive it per-processor and toast completion.
+        // Prime the bar, then let the worker drive it per-log and toast completion.
         dataStore.historyLogSyncProgress.value = HistoryLogSyncProgress(1, 0)
         NightscoutSyncWorker.getInstance(context, prefs, pumpSid)
             .syncRetroactiveRange(startLdt, endLdt) { done, total ->

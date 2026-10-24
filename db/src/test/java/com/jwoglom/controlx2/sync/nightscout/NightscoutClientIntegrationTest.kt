@@ -745,4 +745,69 @@ class NightscoutClientIntegrationTest {
 
         assertTrue(result.isSuccess)
     }
+    // --- Chunking (UPLOAD_CHUNK_SIZE = 100) ---
+    // Every upload must split into ceil(n / 100) POSTs so no single request approaches the
+    // response-window timeout. Covers treatments AND CGM entries, which previously had no cap
+    // and posted the whole retroactive range in one oversized request.
+
+    private fun treatments(n: Int): List<NightscoutTreatment> =
+        (1..n).map { i ->
+            NightscoutTreatment.fromTimestamp(
+                eventType = "Temp Basal",
+                timestamp = LocalDateTime.of(2024, 3, 15, 10, 30, 0),
+                seqId = i.toLong()
+            )
+        }
+
+    private fun entries(n: Int): List<NightscoutEntry> =
+        (1..n).map { i ->
+            NightscoutEntry.fromTimestamp(
+                timestamp = LocalDateTime.of(2024, 3, 15, 10, 30, 0),
+                sgv = 120,
+                direction = "Flat",
+                seqId = i.toLong()
+            )
+        }
+
+    @Test
+    fun uploadTreatments_chunksAt100() = runBlocking {
+        client.uploadTreatments(treatments(250))
+        assertEquals(3, server.capturedRequests.size) // ceil(250 / 100)
+        assertTrue(
+            server.capturedRequests.all { it.method == "POST" && it.path == "/api/v1/treatments" }
+        )
+    }
+
+    @Test
+    fun uploadTreatments_exactChunkIsOneRequest() = runBlocking {
+        client.uploadTreatments(treatments(100))
+        assertEquals(1, server.capturedRequests.size)
+    }
+
+    @Test
+    fun uploadTreatments_oneOverChunkIsTwoRequests() = runBlocking {
+        client.uploadTreatments(treatments(101))
+        assertEquals(2, server.capturedRequests.size)
+    }
+
+    @Test
+    fun uploadEntries_chunksAt100() = runBlocking {
+        client.uploadEntries(entries(250))
+        assertEquals(3, server.capturedRequests.size) // was 1 before chunking
+        assertTrue(
+            server.capturedRequests.all { it.method == "POST" && it.path == "/api/v1/entries" }
+        )
+    }
+
+    @Test
+    fun uploadEntries_exactChunkIsOneRequest() = runBlocking {
+        client.uploadEntries(entries(100))
+        assertEquals(1, server.capturedRequests.size)
+    }
+
+    @Test
+    fun uploadEntries_oneOverChunkIsTwoRequests() = runBlocking {
+        client.uploadEntries(entries(101))
+        assertEquals(2, server.capturedRequests.size)
+    }
 }

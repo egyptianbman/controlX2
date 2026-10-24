@@ -13,6 +13,7 @@ import com.jwoglom.controlx2.sync.nightscout.models.NightscoutProfile
 import com.jwoglom.controlx2.sync.nightscout.models.NightscoutTreatment
 import com.jwoglom.controlx2.sync.nightscout.models.NightscoutStateSpan
 import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.withContext
 import timber.log.Timber
 import java.io.BufferedReader
@@ -37,16 +38,32 @@ class NightscoutClient(
     private val gson = Gson()
     private val apiSecretHash: String by lazy { hashNightscoutApiSecret(apiSecret) }
     private val announcementParser = NightscoutAnnouncementParser(gson)
+    // Backing field (needed so the coordinator can set a hook that persists on this instance;
+    // the interface default alone has no per-instance storage). null = no progress reporting.
+    override var onChunkProgress: ((items: Int) -> Unit)? = null
     private companion object {
-        // Batch Nightscout treatment uploads. A single oversized POST can exceed Nightscout's
-        // response window and trip the 30s read timeout (2283 basal treatments timed out 2026-10-19).
-        const val TREATMENT_UPLOAD_CHUNK_SIZE = 250
+        // Uniform upload chunk size for treatments AND CGM entries. Sized empirically: the
+        // largest item (combo bolus, 360 B) at 100 = ~36 KB, comfortably under the 30%-margin
+        // budget (~53 KB) derived from the proven-safe 250-basal chunk. One shared limit keeps
+        // every processor's POST well under Nightscout's response window -- the 30s read timeout
+        // that timed out 2283 basal treatments on 2026-10-19. uploadEntries had no cap at all.
+        const val UPLOAD_CHUNK_SIZE = 100
+
+        // Pause between upload requests so Nocturne can drain each POST before the next burst.
+        // Requests already run serially per processor; this only guards a tight back-to-back run.
+        const val UPLOAD_REQUEST_DELAY_MS = 200L
     }
 
     override suspend fun uploadEntries(entries: List<NightscoutEntry>): Result<Int> {
         return withContext(Dispatchers.IO) {
             try {
-                post("/api/v1/entries", entries)
+                // Chunk like treatments: CGM had no per-item cap, so a large retroactive range
+                // would POST thousands of readings in one oversized request (same timeout risk).
+                for (chunk in entries.chunked(UPLOAD_CHUNK_SIZE)) {
+                    post("/api/v1/entries", chunk)
+                    delay(UPLOAD_REQUEST_DELAY_MS)
+                    onChunkProgress?.invoke(chunk.size)
+                }
                 Timber.d("Uploaded ${entries.size} entries to Nightscout")
                 Result.success(entries.size)
             } catch (e: Exception) {
@@ -62,8 +79,10 @@ class NightscoutClient(
                 // Chunk large batches: a single oversized POST can exceed Nightscout's
                 // response window and trip the 30s read timeout (2283 basal treatments timed
                 // out 2026-10-19). Smaller batches stay well under the response window.
-                for (chunk in treatments.chunked(TREATMENT_UPLOAD_CHUNK_SIZE)) {
+                for (chunk in treatments.chunked(UPLOAD_CHUNK_SIZE)) {
                     post("/api/v1/treatments", chunk)
+                    delay(UPLOAD_REQUEST_DELAY_MS)
+                    onChunkProgress?.invoke(chunk.size)
                 }
                 Timber.d("Uploaded ${treatments.size} treatments to Nightscout")
                 Result.success(treatments.size)
@@ -136,6 +155,10 @@ class NightscoutClient(
                 val json = post("/api/v4/state-spans", span)
                 val created = gson.fromJson(json, NightscoutStateSpan::class.java)
                 Timber.d("Created PumpMode span ${created.id} (${created.state})")
+                // One span == one log; report per span so the bar moves in single-log steps for
+                // mode changes (Nocturne has no batch state-spans endpoint). Delay removed: spans
+                // are already one-at-a-time here, so the guard only added crawl.
+                onChunkProgress?.invoke(1)
                 Result.success(created)
             } catch (e: NightscoutAuthException) {
                 Timber.w(e, "Nocturne auth failed while creating PumpMode span")

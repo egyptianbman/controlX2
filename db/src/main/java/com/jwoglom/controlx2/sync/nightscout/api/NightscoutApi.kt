@@ -15,6 +15,18 @@ import com.jwoglom.controlx2.sync.nightscout.models.NightscoutStateSpan
  */
 interface NightscoutApi {
     /**
+     * Invoked after each upload chunk is posted, with the item count in that chunk.
+     *
+     * Drives the Nightscout sync progress bar in log-granularity steps: one call per ~chunk-size
+     * items, so a 40k-log sync advances ~100 at a time instead of jumping a whole processor's
+     * worth at once. Optional cross-cutting hook -- the coordinator sets it for a sync run and
+     * clears it after. Mocks leave it null (no-op), so they need no changes.
+     */
+    var onChunkProgress: ((items: Int) -> Unit)?
+        get() = null
+        set(value) {}
+
+    /**
      * Upload CGM entries to Nightscout
      * POST /api/v1/entries
      */
