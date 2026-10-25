@@ -66,13 +66,14 @@ fun AppSetup(
     var wearAutoApproveTimeout by remember { mutableStateOf(Prefs(context).wearBolusAutoApproveTimeoutSeconds()) }
     var checkForUpdates by remember { mutableStateOf(Prefs(context).checkForUpdates()) }
     var autoFetchHistoryLogs by remember { mutableStateOf(Prefs(context).autoFetchHistoryLogs()) }
+    var pumpRefreshIntervalMinutes by remember { mutableStateOf(Prefs(context).pumpRefreshIntervalMinutes()) }
     var glucoseUnit by remember { mutableStateOf(Prefs(context).glucoseUnit()) }
-
     var showGlucoseUnitDialog by remember { mutableStateOf(false) }
     var showInsulinWarningDialog by remember { mutableStateOf(false) }
     var showBolusThresholdDialog by remember { mutableStateOf(false) }
     var showWearAutoApproveDialog by remember { mutableStateOf(false) }
     var showUpdatesWarningDialog by remember { mutableStateOf(false) }
+    var showPumpRefreshIntervalDialog by remember { mutableStateOf(false) }
 
     DialogScreen(
         "App Setup",
@@ -308,6 +309,26 @@ fun AppSetup(
         item {
             ListItem(
                 headlineContent = {
+                    Text("Refresh Pump Data")
+                },
+                supportingContent = {
+                    Text("How often the app polls the pump for new history and CGM readings")
+                },
+                trailingContent = {
+                    Text(
+                        text = "${pumpRefreshIntervalMinutes} min",
+                        color = MaterialTheme.colorScheme.onSurfaceVariant
+                    )
+                },
+                modifier = Modifier.clickable {
+                    showPumpRefreshIntervalDialog = true
+                }
+            )
+            Divider()
+        }
+        item {
+            ListItem(
+                headlineContent = {
                     Text("Glucose Unit")
                 },
                 supportingContent = {
@@ -364,6 +385,40 @@ fun AppSetup(
             },
             confirmButton = {
                 TextButton(onClick = { showGlucoseUnitDialog = false }) {
+                    Text("Cancel")
+                }
+            }
+        )
+    }
+    // Refresh Pump Data Interval Dialog
+    if (showPumpRefreshIntervalDialog) {
+        var intervalInput by remember { mutableStateOf(pumpRefreshIntervalMinutes.toString()) }
+        AlertDialog(
+            onDismissRequest = { showPumpRefreshIntervalDialog = false },
+            title = { Text("Refresh Pump Data") },
+            text = {
+                OutlinedTextField(
+                    value = intervalInput,
+                    onValueChange = { input ->
+                        intervalInput = input.filter { it.isDigit() }
+                    },
+                    label = { Text("Minutes") },
+                    keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
+                    modifier = Modifier.fillMaxWidth()
+                )
+            },
+            confirmButton = {
+                TextButton(onClick = {
+                    val minutes = intervalInput.toIntOrNull() ?: pumpRefreshIntervalMinutes
+                    pumpRefreshIntervalMinutes = minutes
+                    Prefs(context).setPumpRefreshIntervalMinutes(minutes)
+                    showPumpRefreshIntervalDialog = false
+                }) {
+                    Text("Save")
+                }
+            },
+            dismissButton = {
+                TextButton(onClick = { showPumpRefreshIntervalDialog = false }) {
                     Text("Cancel")
                 }
             }

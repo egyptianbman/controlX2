@@ -151,11 +151,13 @@ class CommService : Service(), CommServiceCallbacks {
     // BleChangeReceiver and BondState extracted to pump/BleChangeReceiver.kt
     private var bleChangeReceiver = BleChangeReceiver()
 
-    private val periodicUpdateIntervalMs: Long = 1000 * 60 * 5 // 5 minutes
+    // Read fresh each cycle so a settings change takes effect on the next poll without a restart.
+    private fun periodicUpdateIntervalMs(): Long =
+        1000L * 60 * Prefs(applicationContext).pumpRefreshIntervalMinutes()
     private var periodicUpdateTask: Runnable = Runnable {}
     init {
         periodicUpdateTask = Runnable {
-            pumpCommHandler?.postDelayed(periodicUpdateTask, periodicUpdateIntervalMs)
+            pumpCommHandler?.postDelayed(periodicUpdateTask, periodicUpdateIntervalMs())
 
             fun apiVersion(): ApiVersion {
                 var apiVersion = PumpState.getPumpAPIVersion()
@@ -263,7 +265,7 @@ class CommService : Service(), CommServiceCallbacks {
         } else {
             pumpCommHandler = PumpCommHandler(serviceLooper!!, this)
 
-            pumpCommHandler?.postDelayed(periodicUpdateTask, periodicUpdateIntervalMs)
+            pumpCommHandler?.postDelayed(periodicUpdateTask, periodicUpdateIntervalMs())
             pumpCommHandler?.postDelayed(checkForUpdatesTask, checkForUpdatesDelayMs)
         }
 
@@ -320,7 +322,7 @@ class CommService : Service(), CommServiceCallbacks {
                     Prefs(applicationContext).setUnbondOnNextCommInitMac(filterToMac)
                     Timber.i("stop-pump-finder-next: filterToMac=$filterToMac pairingCodeType=$pairingCodeType")
 
-                    pumpCommHandler?.postDelayed(periodicUpdateTask, periodicUpdateIntervalMs)
+                    pumpCommHandler?.postDelayed(periodicUpdateTask, periodicUpdateIntervalMs())
                     pumpCommHandler?.postDelayed(checkForUpdatesTask, checkForUpdatesDelayMs)
                     sendInitPumpComm(pairingCodeTypeEnum, filterToMac)
                     sendWearCommMessage(MessagePaths.TO_SERVER_COMM_STARTED, "".toByteArray())

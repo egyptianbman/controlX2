@@ -167,6 +167,20 @@ class Prefs(val context: Context) {
     }
 
     /**
+     * How often the service polls the pump for status (minutes). This drives how quickly new
+     * history/CGM data is pulled from the pump into the DB, so it is the dominant term in
+     * end-to-end latency to NightScout. 1-minute floor guards against wedging the worker; the
+     * old hardcoded value was 5.
+     */
+    fun pumpRefreshIntervalMinutes(): Int {
+        return prefs().getInt("pump-refresh-interval-minutes", 5)
+    }
+
+    fun setPumpRefreshIntervalMinutes(minutes: Int) {
+        prefs().edit().putInt("pump-refresh-interval-minutes", minutes.coerceIn(1, 60)).commit()
+    }
+
+    /**
      * User's preferred glucose unit (mg/dL or mmol/L)
      */
     fun glucoseUnit(): GlucoseUnit? {
