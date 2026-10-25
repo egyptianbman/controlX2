@@ -461,7 +461,9 @@ fun NightscoutSettings(
             confirmButton = {
                 TextButton(onClick = {
                     val minutes = intervalInput.toIntOrNull() ?: 15
-                    val newConfig = config.copy(syncIntervalMinutes = minutes.coerceIn(5, 1440))
+                    // 1-minute floor only guards against an accidental 0 wedging the worker; the
+                    // upper bound is 24h. Lower removed so minute-grade CGMs (e.g. G7 rapid) sync fast.
+                    val newConfig = config.copy(syncIntervalMinutes = minutes.coerceIn(1, 1440))
                     config = newConfig
                     NightscoutSyncConfig.save(prefs, newConfig)
 
