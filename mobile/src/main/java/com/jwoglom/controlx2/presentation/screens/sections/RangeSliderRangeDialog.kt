@@ -9,20 +9,23 @@ import android.widget.TextView
 import com.google.android.material.slider.RangeSlider
 
 /**
- * Shared range-selection dialog: a native [RangeSlider] over a [firstSeq]..[lastSeq] window with
- * live Start/End date labels ([dateLabel]) and a computed [detail] row.
+ * Shared range-selection dialog: a native [RangeSlider] over the full [minSeq]..[maxSeq] history
+ * window, with the two handles defaulting to [initialStart]..[maxSeq] (e.g. the last 24h). The track
+ * always spans the whole fetched history so the user can drag the start handle back further; only the
+ * default handle position is narrowed.
  *
- * The Debug history fetcher and the NightScout "Send Range" action both call this so they share
- * one builder and identical UX instead of each rebuilding the slider, rows, and live updates.
- * The caller supplies the seq window, how to render an id as a date, and the detail string, so the
- * dialog itself has no dependency on the pump, the DB, or the anchor sampler.
+ * The Debug history fetcher and the NightScout "Send Range" action both call this so they share one
+ * builder and identical UX instead of each rebuilding the slider, rows, and live updates. The caller
+ * supplies the seq window, how to render an id as a date, and the detail string, so the dialog itself
+ * has no dependency on the pump, the DB, or the anchor sampler.
  */
 internal suspend fun rangeSliderRangeDialog(
     context: Context,
     title: String,
     instructions: String,
-    firstSeq: Long,
-    lastSeq: Long,
+    minSeq: Long,
+    maxSeq: Long,
+    initialStart: Long = minSeq,
     dateLabel: (id: Long) -> String,
     detail: (startId: Long, endId: Long) -> String,
     confirmText: String,
@@ -34,21 +37,25 @@ internal suspend fun rangeSliderRangeDialog(
     val layout = LinearLayout(context).apply { orientation = LinearLayout.VERTICAL }
 
     // Range slider: two native handles pick the start (oldest) and end (head) IDs. RangeSlider
-    // keeps the thumbs ordered, so start never runs past end without manual clamping.
+    // keeps the thumbs ordered, so start never runs past end without manual clamping. The track
+    // spans the full history; only the default handles are narrowed to [initialStart, maxSeq].
     layout.addView(divider(context))
     layout.addView(instructions(context, instructions))
+    // Clamp the default start into the track so the handles can never fall outside
+    // [valueFrom, valueTo] — RangeSlider throws on out-of-bounds or unordered values.
+    val defaultStart = initialStart.coerceIn(minSeq, maxSeq)
     val rangeSlider = RangeSlider(context).apply {
-        valueFrom = firstSeq.toFloat()
-        valueTo = lastSeq.toFloat()
-        values = mutableListOf(firstSeq.toFloat(), lastSeq.toFloat())
+        valueFrom = minSeq.toFloat()
+        valueTo = maxSeq.toFloat()
+        values = mutableListOf(defaultStart.toFloat(), maxSeq.toFloat())
         stepSize = 1.0f
     }
     layout.addView(rangeSlider)
 
     // Info rows: start/end/detail, kept current as either slider moves.
-    val startRow = infoRow(context, "Start", dateLabel(firstSeq))
-    val endRow = infoRow(context, "End", dateLabel(lastSeq))
-    val detailRow = infoRow(context, "Detail", detail(firstSeq, lastSeq))
+    val startRow = infoRow(context, "Start", dateLabel(defaultStart))
+    val endRow = infoRow(context, "End", dateLabel(maxSeq))
+    val detailRow = infoRow(context, "Detail", detail(defaultStart, maxSeq))
     layout.addView(startRow.first)
     layout.addView(endRow.first)
     layout.addView(detailRow.first)

@@ -508,16 +508,25 @@ suspend fun openNightscoutRangeDialog(
 ) {
     val anchorManager = HistoryLogAnchorManager(context)
 
-    // Bounds + anchors are DB reads; keep them off the main thread.
-    val range = withContext(Dispatchers.IO) {
-        HistoryLogDatabase.getDatabase(context)
+    // Bounds + anchors are DB reads; Room throws IllegalStateException on main-thread access, so do
+    // them inside the IO block together (the anchor lookup also reads the DB).
+    val (tail, head, lookup) = withContext(Dispatchers.IO) {
+        val range = HistoryLogDatabase.getDatabase(context)
             .historyLogDao()
             .getSeqRange(pumpSid)
             .first()
+        // A null range means no rows exist for this pumpSid. A non-null range is real history even
+        // when its min seqId is 0 (pump sequence numbers start at 0), so only null means "empty".
+        if (range == null) {
+            return@withContext Triple(0L, 0L, null)
+        }
+        Triple(
+            range.minSeqId!!,
+            range.maxSeqId!!,
+            HistoryLogAnchorLookup(anchorManager.anchors(pumpSid))
+        )
     }
-    // A null range means no rows exist for this pumpSid. A non-null range is real history even
-    // when its min seqId is 0 (pump sequence numbers start at 0), so only null means "empty".
-    if (range == null) {
+    if (lookup == null) {
         Toast.makeText(
             context,
             "No history in this app yet — fetch logs first",
@@ -525,14 +534,16 @@ suspend fun openNightscoutRangeDialog(
         ).show()
         return
     }
-    val lookup = HistoryLogAnchorLookup(anchorManager.anchors(pumpSid))
+    // Default the slider to the last ~24h (head-24h .. head); the full span stays reachable.
+    val defaultStart = lookup.recentStart(head, fallback = tail)
 
     rangeSliderRangeDialog(
         context,
         "Send Range to NightScout",
         "Only data already downloaded to this app is sent. Use Get History Logs first to pull more.",
-        range.minSeqId!!,
-        range.maxSeqId!!,
+        minSeq = tail,
+        maxSeq = head,
+        initialStart = defaultStart,
         dateLabel = { id -> formatAnchor(id, lookup) },
         detail = { start, end -> "${end - start + 1} items in app" },
         confirmText = "Send to NightScout"

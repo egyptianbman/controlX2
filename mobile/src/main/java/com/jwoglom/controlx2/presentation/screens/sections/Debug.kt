@@ -1186,15 +1186,19 @@ suspend fun triggerHistoryLogRequestDialog(
         HistoryLogAnchorLookup(emptyList())
     }
 
-    val first = status.firstSequenceNum
+    val tail = status.firstSequenceNum
     val head = status.lastSequenceNum
+    // Default the slider to the last ~24h (head-24h .. head); the full pump span stays reachable.
+    // With no anchors yet (fresh fetch) recentStart falls back to the oldest id, i.e. the full span.
+    val defaultStart = lookup.recentStart(head, fallback = tail)
 
     rangeSliderRangeDialog(
         context,
         "Get history logs",
         "Drag the two handles to select the range of history to fetch.",
-        first,
-        head,
+        minSeq = tail,
+        maxSeq = head,
+        initialStart = defaultStart,
         dateLabel = { id -> formatAnchor(id, lookup) },
         detail = { startId, endId -> "~${requestCount(startId, endId)} request(s)" },
         confirmText = "Fetch"

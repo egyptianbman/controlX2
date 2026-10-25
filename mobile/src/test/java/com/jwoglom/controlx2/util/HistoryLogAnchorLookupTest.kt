@@ -77,4 +77,73 @@ class HistoryLogAnchorLookupTest {
         )
         assertEquals(at(2008, 1, 1, 12), lookup.dateForId(105000))
     }
+    // --- idForDate (inverse of dateForId) ---
+
+    @Test
+    fun idForDate_emptyAnchors_returnsFallback() {
+        val lookup = HistoryLogAnchorLookup(emptyList())
+        assertEquals(777L, lookup.idForDate(at(2008, 1, 5, 0), fallback = 777L))
+    }
+
+    @Test
+    fun idForDate_exactAnchorDate_returnsItsId() {
+        val lookup = HistoryLogAnchorLookup(
+            listOf(anchor(100000, 0), anchor(110000, 1), anchor(120000, 2))
+        )
+        assertEquals(100000L, lookup.idForDate(at(2008, 1, 1, 0), fallback = 0L))
+        assertEquals(120000L, lookup.idForDate(at(2008, 1, 3, 0), fallback = 0L))
+    }
+
+    @Test
+    fun idForDate_interpolatesBetweenAnchors() {
+        // 1 day apart, 10000 IDs apart. 12h in -> midpoint id; 8h in -> 1/3 of the way.
+        val lookup = HistoryLogAnchorLookup(listOf(anchor(100000, 0), anchor(110000, 1)))
+        assertEquals(105000L, lookup.idForDate(at(2008, 1, 1, 12), fallback = 0L))
+        assertEquals(103333L, lookup.idForDate(at(2008, 1, 1, 8), fallback = 0L))
+    }
+
+    @Test
+    fun idForDate_belowAllAnchors_returnsFallback() {
+        val lookup = HistoryLogAnchorLookup(listOf(anchor(110000, 1), anchor(120000, 2)))
+        assertEquals(42L, lookup.idForDate(at(2008, 1, 1, 0), fallback = 42L))
+    }
+
+    @Test
+    fun idForDate_aboveAllAnchors_returnsHeadAnchor() {
+        val lookup = HistoryLogAnchorLookup(listOf(anchor(100000, 0), anchor(110000, 1)))
+        assertEquals(110000L, lookup.idForDate(at(2008, 1, 10, 0), fallback = 0L))
+    }
+
+    // --- recentStart ---
+
+    @Test
+    fun recentStart_defaultsTo24hWindow() {
+        // 4 anchors, 1 day apart. head at day 3 -> 24h back is day 2 (id 120000).
+        val lookup = HistoryLogAnchorLookup(
+            listOf(anchor(100000, 0), anchor(110000, 1), anchor(120000, 2), anchor(130000, 3))
+        )
+        assertEquals(120000L, lookup.recentStart(head = 130000L, fallback = 100000L))
+    }
+
+    @Test
+    fun recentStart_respectsCustomHours() {
+        val lookup = HistoryLogAnchorLookup(
+            listOf(anchor(100000, 0), anchor(110000, 1), anchor(120000, 2), anchor(130000, 3))
+        )
+        // 48h back from day 3 -> day 1 (id 110000).
+        assertEquals(110000L, lookup.recentStart(head = 130000L, fallback = 100000L, hours = 48))
+    }
+
+    @Test
+    fun recentStart_noAnchors_fallsBackToFullSpan() {
+        val lookup = HistoryLogAnchorLookup(emptyList())
+        assertEquals(100000L, lookup.recentStart(head = 130000L, fallback = 100000L))
+    }
+
+    @Test
+    fun recentStart_windowLargerThanHistory_fallsBackToFullSpan() {
+        // Data spans 24h (day 0..day 1); asking for 48h back lands before the oldest anchor.
+        val lookup = HistoryLogAnchorLookup(listOf(anchor(100000, 0), anchor(120000, 1)))
+        assertEquals(100000L, lookup.recentStart(head = 120000L, fallback = 100000L, hours = 48))
+    }
 }

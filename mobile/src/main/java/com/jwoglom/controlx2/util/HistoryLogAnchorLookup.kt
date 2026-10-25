@@ -40,8 +40,53 @@ class HistoryLogAnchorLookup(private val anchors: List<HistoryLogAnchorItem>) {
         }
     }
 
+    /**
+     * Inverse of [dateForId]: the seqId whose anchored date is closest to [date], found by inverting
+     * the linear anchor interpolation. Returns [fallback] when anchors are missing or [date]
+     * predates all of them, so a caller can degrade to an earlier bound. Assumes the pump clock
+     * increases with anchorId (the sampler records anchors chronologically).
+     */
+    fun idForDate(date: LocalDateTime, fallback: Long): Long {
+        if (sorted.isEmpty()) return fallback
+        val targetSec = dateToPumpTimeSec(date)
+        val exact = sorted.firstOrNull { it.pumpTimeSec.toDouble() == targetSec }
+        if (exact != null) return exact.anchorId
+        val lower = sorted.lastOrNull { it.pumpTimeSec < targetSec }
+        val upper = sorted.firstOrNull { it.pumpTimeSec > targetSec }
+        return when {
+            // Bracketed by two anchors: invert the interpolation for a sub-anchor-precision id.
+            lower != null && upper != null -> {
+                val tSpan = upper.pumpTimeSec - lower.pumpTimeSec.toDouble()
+                val idSpan = (upper.anchorId - lower.anchorId).toDouble()
+                if (tSpan == 0.0) return lower.anchorId
+                val frac = (targetSec - lower.pumpTimeSec) / tSpan
+                (lower.anchorId + frac * idSpan).roundToLong()
+            }
+            // [date] is at/after the newest anchor -> nearest is the head anchor.
+            upper == null -> sorted.last().anchorId
+            // [date] predates every anchor -> hand back the caller's earlier-bound fallback.
+            else -> fallback
+        }
+    }
+
+    /**
+     * Default start seqId for a range ending at [head] covering the most recent [hours] hours.
+     *
+     * seqIds are event-driven (not time-uniform), so the start is the seqId whose anchored date is
+     * ~[hours] before [head]'s date, found by inverting [idForDate]. Returns [fallback] when anchors
+     * are missing or the target predates all of them, so the window degrades to the full
+     * [fallback..head] span.
+     */
+    fun recentStart(head: Long, fallback: Long, hours: Int = 24): Long {
+        val headDate = dateForId(head) ?: return fallback
+        return idForDate(headDate.minusHours(hours.toLong()), fallback = fallback)
+    }
+
     private fun pumpTimeSecToDate(pumpTimeSec: Double): LocalDateTime =
         LocalDateTime.ofEpochSecond(
             (pumpTimeSec + Dates.JANUARY_1_2008_UNIX_EPOCH).roundToLong(), 0, ZoneOffset.UTC
         )
-}
+
+    private fun dateToPumpTimeSec(date: LocalDateTime): Double =
+        (date.toEpochSecond(ZoneOffset.UTC) - Dates.JANUARY_1_2008_UNIX_EPOCH).toDouble()
+ }
