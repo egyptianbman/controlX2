@@ -509,16 +509,15 @@ suspend fun openNightscoutRangeDialog(
     val anchorManager = HistoryLogAnchorManager(context)
 
     // Bounds + anchors are DB reads; keep them off the main thread.
-    val (firstSeq, lastSeq, lookup) = withContext(Dispatchers.IO) {
-        val range = HistoryLogDatabase.getDatabase(context)
+    val range = withContext(Dispatchers.IO) {
+        HistoryLogDatabase.getDatabase(context)
             .historyLogDao()
             .getSeqRange(pumpSid)
             .first()
-        val min = range?.minSeqId ?: 0L
-        val max = range?.maxSeqId ?: 0L
-        Triple(min, max, HistoryLogAnchorLookup(anchorManager.anchors(pumpSid)))
     }
-    if (firstSeq <= 0L || lastSeq < firstSeq) {
+    // A null range means no rows exist for this pumpSid. A non-null range is real history even
+    // when its min seqId is 0 (pump sequence numbers start at 0), so only null means "empty".
+    if (range == null) {
         Toast.makeText(
             context,
             "No history in this app yet — fetch logs first",
@@ -526,13 +525,14 @@ suspend fun openNightscoutRangeDialog(
         ).show()
         return
     }
+    val lookup = HistoryLogAnchorLookup(anchorManager.anchors(pumpSid))
 
     rangeSliderRangeDialog(
         context,
         "Send Range to NightScout",
         "Only data already downloaded to this app is sent. Use Get History Logs first to pull more.",
-        firstSeq,
-        lastSeq,
+        range.minSeqId!!,
+        range.maxSeqId!!,
         dateLabel = { id -> formatAnchor(id, lookup) },
         detail = { start, end -> "${end - start + 1} items in app" },
         confirmText = "Send to NightScout"
